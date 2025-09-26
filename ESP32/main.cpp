@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <ESP32Servo.h>
+#include <WiFi.h>
 
 Servo myServo;
 
@@ -13,4 +14,5 @@ void loop() {
   delay(1000);
   myServo.write(0);   // Move the servo to 0 degrees
   delay(1000);
+
 }
