@@ -1,5 +1,5 @@
 #include <WiFi.h>
-#include <Servo.h>
+#include <ESP32Servo.h>
 #include <math.h>
 
 // config
