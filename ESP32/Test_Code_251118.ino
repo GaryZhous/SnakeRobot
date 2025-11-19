@@ -29,6 +29,9 @@ void setup() {
     servos[i].attach(servoPins[i]);
   }
   startTime = millis();
+  for (int i = 0; i < numServos; i++){
+    servos[i].write(90); // align the motors properly first
+  }
 }
 
 void loop() {
