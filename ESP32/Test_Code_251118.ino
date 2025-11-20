@@ -25,6 +25,7 @@ int adjustAngle(float a) {
 }
 
 void setup() {
+  Serial.begin(9600);
   for (int i = 0; i < numServos; i++) {
     servos[i].attach(servoPins[i]);
   }
@@ -33,12 +34,25 @@ void setup() {
     servos[i].write(90); // align the motors properly first
   }
 }
-
+void calibrate(){
+  for (int i = 0; i < numServos; i++){
+    servos[i].write(90); // align the motors properly first
+  }
+}
 void loop() {
   float t = (millis() - startTime) / 1000.0;
   float omega = TWO_PI * frequency;
   
   for (int i = 0; i < numServos; i++) {
+    if (Serial.available() > 0) {
+      // read the incoming byte:
+      incomingByte = Serial.read();
+  
+      if(incomingByte == 0){
+        calibrate();
+        while(Serial.read() == 0);
+      }
+    }
     float phase = i * phaseShift;
     float angle = center + amplitude * sinf(omega * t + phase);
     servos[i].write(adjustAngle(angle));
