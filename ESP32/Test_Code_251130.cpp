@@ -4,23 +4,23 @@
 // ===== CONFIG =====
 const int numServos = 6;
 
-// Choose valid ESP32 GPIO pins for PWM output
-// Example: change these to the pins you actually wired
+// Pick valid ESP32 GPIO pins
 const int servoPins[numServos] = {13, 12, 14, 27, 26, 25};
 
 // traveling wave: phase spacing for 6 joints
-const float phaseShift = TWO_PI / numServos; // = 2π/6 = 60°
+const float phaseShift = TWO_PI / numServos; // 2π/6 = 60°
 
-// params
+// motion params
 float amplitude = 45;        // swing size (degrees)
 float frequency = 0.5;       // Hz
-float center = 90;           // neutral position is 90°
+float center = 90;           // neutral position
+float turnOffset = 0;        // extra bias for turning (±deg)
 
 unsigned long startTime;
 int updateDelay = 20;        // ms
 
 Servo servos[numServos];
-int incomingByte = -1;       // for Serial commands
+int incomingByte = -1;       // for serial commands
 
 // Clamp and round angle to [0, 180]
 int adjustAngle(float a) {
@@ -35,17 +35,43 @@ void calibrate() {
   }
 }
 
+// Handle serial commands:
+// '0' -> calibrate
+// 'l' / 'L' -> turn left
+// 'r' / 'R' -> turn right
+// 's' / 'S' -> straight (no turn)
+void handleSerial() {
+  while (Serial.available() > 0) {
+    incomingByte = Serial.read();
+
+    if (incomingByte == '0') {
+      turnOffset = 0;
+      calibrate();
+      Serial.println("Calibrate to 90 deg");
+    } else if (incomingByte == 'l' || incomingByte == 'L') {
+      turnOffset = -15;   // try negative for one side
+      Serial.println("Turn LEFT");
+    } else if (incomingByte == 'r' || incomingByte == 'R') {
+      turnOffset = 15;    // positive for the other side
+      Serial.println("Turn RIGHT");
+    } else if (incomingByte == 's' || incomingByte == 'S') {
+      turnOffset = 0;
+      Serial.println("Straight");
+    }
+  }
+}
+
 void setup() {
   Serial.begin(115200);
 
-  // Allocate PWM timers (needed for ESP32Servo)
+  // PWM timers for ESP32Servo
   ESP32PWM::allocateTimer(0);
   ESP32PWM::allocateTimer(1);
   ESP32PWM::allocateTimer(2);
   ESP32PWM::allocateTimer(3);
 
   for (int i = 0; i < numServos; i++) {
-    servos[i].setPeriodHertz(50);           // standard servo frequency
+    servos[i].setPeriodHertz(50);              // standard servo frequency
     servos[i].attach(servoPins[i], 500, 2400); // pin, minUs, maxUs
   }
 
@@ -54,25 +80,15 @@ void setup() {
 }
 
 void loop() {
+  handleSerial();   // check for new commands
+
   float t = (millis() - startTime) / 1000.0f;
   float omega = TWO_PI * frequency;
 
-  // Check serial command once per loop
-  if (Serial.available() > 0) {
-    incomingByte = Serial.read();
-    // Expecting character '0' from Serial Monitor
-    if (incomingByte == '0') {
-      calibrate();
-      // Optional: clear any extra '0's in the buffer
-      while (Serial.available() > 0 && Serial.peek() == '0') {
-        Serial.read();
-      }
-    }
-  }
-
   for (int i = 0; i < numServos; i++) {
     float phase = i * phaseShift;
-    float angle = center + amplitude * sinf(omega * t + phase);
+    // add turnOffset to bias the whole wave to one side
+    float angle = (center + turnOffset) + amplitude * sinf(omega * t + phase);
     servos[i].write(adjustAngle(angle));
   }
 
