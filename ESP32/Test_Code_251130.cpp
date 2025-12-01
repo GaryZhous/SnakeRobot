@@ -1,6 +1,6 @@
 #include <ESP32Servo.h>
 #include <math.h>
-#include "BluetoothSerial.h"   // have to import bruh
+#include "BluetoothSerial.h"  
 
 // ===== CONFIG =====
 const int numServos = 6;
