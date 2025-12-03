@@ -1,7 +1,7 @@
 import bluetooth
 import time
 
-# Replace with the MAC address you saw (example below)
+# the MAC address of our ESP32 is here
 ESP32_ADDR = "B8:D6:1A:5B:DE:BA"
 
 print(f"Trying to connect to ESP32 at {ESP32_ADDR}...")
