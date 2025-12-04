@@ -17,7 +17,7 @@ except Exception as e:
 print("You can now type commands:")
 print("  l = turn left")
 print("  r = turn right")
-print("  s = straight")
+print("  s = straight") # move from 0
 print("  0 = calibrate")
 print("  q = quit")
 
