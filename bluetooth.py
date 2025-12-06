@@ -8,10 +8,10 @@ print(f"Trying to connect to ESP32 at {ESP32_ADDR}...")
 sock = bluetooth.BluetoothSocket(bluetooth.RFCOMM)
 
 try:
-    sock.connect((ESP32_ADDR, 1))   # RFCOMM channel 1
-    print("✅ Connected to ESP32!")
+    sock.connect((ESP32_ADDR, 1))  
+    print("Connected to ESP32!")
 except Exception as e:
-    print("❌ Failed to connect:", e)
+    print("Failed to connect:", e)
     exit()
 
 print("You can now type commands:")
