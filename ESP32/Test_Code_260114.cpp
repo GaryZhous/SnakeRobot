@@ -25,7 +25,7 @@ float turnStepPerSec = 30.0f;
 // Example: switching from +15 to -15 is 30 deg total => ~1.0s if 30 deg/sec, so it won't snap like crazy
 
 unsigned long startTime;
-int updateDelay = 20;        // ms
+int updateDelay = 10;        // ms, reduced
 
 Servo servos[numServos];
 int incomingByte = -1;
