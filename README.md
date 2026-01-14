@@ -3,3 +3,7 @@
 ## Hardware Setup
 1. Pins used for 5 motors (13, 12, 14, 27, 26)
 2. use the python code to calibrate the motors first.
+
+## Software Setup
+1. ESP32Servo.h --> standard ESP32 library
+2. BluetoothSerial.h --> personal repo so please do include "BluetoothSerial.h"
