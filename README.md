@@ -6,6 +6,6 @@
 
 ## Software Setup
 1. ESP32Servo.h --> standard ESP32 library
-2. BluetoothSerial.h --> personal repo so please do include "BluetoothSerial.h"
+2. BluetoothSerial.h --> personal repo so please do `include "BluetoothSerial.h"`
 3. `pip install pybluez`
 4. `pip install tkinter`
