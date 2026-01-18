@@ -78,12 +78,12 @@ void handleBluetooth() {
       Serial.println("Calibrate to 90 deg, STOP");
       SerialBT.println("Calibrate to 90 deg, STOP");
 
-    } else if (incomingByte == 'l' || incomingByte == 'L') {
+    } else if (incomingByte == 'r' || incomingByte == 'R') {
       targetTurnOffset = -15;
       Serial.println("Turn LEFT (smooth)");
       SerialBT.println("Turn LEFT (smooth)");
 
-    } else if (incomingByte == 'r' || incomingByte == 'R') {
+    } else if (incomingByte == 'l' || incomingByte == 'L') {
       targetTurnOffset = 15;
       Serial.println("Turn RIGHT (smooth)");
       SerialBT.println("Turn RIGHT (smooth)");
