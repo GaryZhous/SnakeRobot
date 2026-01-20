@@ -2,8 +2,8 @@
 #include <math.h>
 
 // === CONFIGURATION ===
-const int numServos = 1;
-const int servoPins[numServos] = {3};
+const int numServos = 2;
+const int servoPins[numServos] = {3, 5};
 
 // === Motion parameters ===
 float amplitude = 45;        // swing size (degrees)
