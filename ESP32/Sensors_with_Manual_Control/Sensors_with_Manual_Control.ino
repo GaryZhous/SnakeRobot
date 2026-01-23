@@ -328,6 +328,8 @@ void setup() {
   digitalWrite(BNO08X_CS, HIGH);
   delay(50);
 
+  // /*
+
   // ---- Init PMW3901 ----
   if (!flow.begin()) {
     Serial.println("PMW3901 init FAILED");
@@ -342,6 +344,8 @@ void setup() {
   }
   Serial.println("BNO08x init OK");
   setReports();
+
+  // */
 
   // ---- Bluetooth ----
   if (!SerialBT.begin(kBtName)) {
