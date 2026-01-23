@@ -6,7 +6,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 
 DEFAULT_ESP32_ADDR = "E0:8C:FE:5C:E2:A6"
-DEFAULT_CHANNEL = 1  # RFCOMM channel
+DEFAULT_CHANNEL = 1
 
 
 class ESP32ControllerUI:
