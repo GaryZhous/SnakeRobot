@@ -50,7 +50,7 @@ class TelemetryUI:
     def __init__(self, root: tk.Tk):
         self.root = root
         self.root.title("ESP32 Snake Telemetry")
-        self.root.geometry("460x300")
+        self.root.geometry("420x260")
 
         self.ser = None
         self.stop_flag = threading.Event()
@@ -101,16 +101,10 @@ class TelemetryUI:
         self.btn_send = ttk.Button(cmd_frame, text="Send", command=self.send_command, state="disabled")
         self.btn_send.grid(row=0, column=2, sticky="e")
 
-        hint = ttk.Label(mid, text="Valid commands: c l r s 0..9 + -   (Enter sends first char)")
-        hint.grid(row=4, column=0, columnspan=2, sticky="w", pady=(10, 0))
-
         # Status bar
         bottom = ttk.Frame(root)
         bottom.pack(fill="x", padx=10, pady=(0, 10))
         ttk.Label(bottom, textvariable=self.status_var).pack(side="left")
-
-        # Optional hotkeys (only when window focused)
-        self.root.bind("<KeyPress>", self._on_keypress)
 
         # Poll queue periodically for new telemetry
         self.root.after(50, self._poll_queue)
@@ -169,15 +163,6 @@ class TelemetryUI:
         self.btn_disconnect.config(state="disabled")
         self.btn_send.config(state="disabled")
 
-    def send_one_byte(self, c: str):
-        if self.ser is None:
-            return
-        try:
-            self.ser.write(c.encode("utf-8"))  # 1 byte
-            self.status_var.set(f"Sent: {c}")
-        except Exception as e:
-            messagebox.showerror("Send Failed", str(e))
-
     def send_command(self):
         if self.ser is None:
             return
@@ -188,34 +173,19 @@ class TelemetryUI:
 
         c = text[0]  # one byte/letter at a time
         if c not in "lrs c0123456789+-".replace(" ", ""):
-            messagebox.showwarning("Invalid Command", "Valid: c l r s 0..9 + -")
+            messagebox.showwarning("Invalid Command", "Valid: l r s c 0..9 + -")
             return
 
-        self.send_one_byte(c)
+        try:
+            self.ser.write(c.encode("utf-8"))
+            self.status_var.set(f"Sent: {c}")
+        except Exception as e:
+            messagebox.showerror("Send Failed", str(e))
+
         self.cmd_entry.delete(0, "end")
 
-    def _on_keypress(self, event):
-        # ignore keypresses while typing in the entry (so you can type numbers normally)
-        if self.root.focus_get() == self.cmd_entry:
-            return
-
-        # Map WASD-ish to your command set (optional)
-        mapping = {
-            'w': 's',   # start/resume motion
-            'a': 'l',   # left
-            'd': 'r',   # right
-            'x': 'c',   # stop/calibrate
-            '+': '+',
-            '-': '-',
-        }
-        ch = event.char
-
-        if ch in mapping:
-            self.send_one_byte(mapping[ch])
-        elif ch in "0123456789":
-            self.send_one_byte(ch)
-
     def _poll_queue(self):
+        # Consume all queued telemetry updates
         try:
             while True:
                 item = self.q.get_nowait()
@@ -245,6 +215,7 @@ class TelemetryUI:
 
 def main():
     root = tk.Tk()
+    # Nice default theme on Windows
     try:
         ttk.Style().theme_use("clam")
     except Exception:
