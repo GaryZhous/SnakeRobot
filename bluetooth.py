@@ -7,9 +7,6 @@ import serial
 import tkinter as tk
 from tkinter import ttk, messagebox
 
-# =========================
-# Defaults (edit if you want)
-# =========================
 DEFAULT_COM_PORT = "COM10"
 DEFAULT_BAUD = 115200
 READ_TIMEOUT = 0.2
