@@ -7,134 +7,115 @@ import serial
 import tkinter as tk
 from tkinter import ttk, messagebox
 
-DEFAULT_COM_PORT = "COM10"
-DEFAULT_BAUD = 115200
-READ_TIMEOUT = 0.2
+# =========================
+# Configure these (DON'T CHANGE LOGIC)
+# =========================
+PORT = "COM11"      # <-- your Bluetooth SPP COM port
+BAUD = 115200       # SPP often ignores baud, but keep consistent
+READ_TIMEOUT = 0.2  # seconds
 
-TELEM_FMT = "<fff"  # 3 float32 little-endian
+# Telemetry format: 3 float32 little-endian = 12 bytes
+TELEM_FMT = "<fff"
 TELEM_SIZE = struct.calcsize(TELEM_FMT)  # 12 bytes
-RECV_CHUNK = 1024
 
 
 def rx_loop(ser: serial.Serial, stop_flag: threading.Event, out_q: queue.Queue):
     """
-    Queue-based RX worker:
-      - Reads serial bytes
-      - Parses fixed 12-byte frames (<fff)
-      - Pushes tuples (direction_deg, xw_m, yw_m) to UI via out_q
-    """
-    buf = bytearray()
-    out_q.put(("__LOG__", "RX thread started (telemetry)."))
+    Continuously read telemetry frames from ESP32.
+    Each frame is exactly 12 bytes: direction_deg, xw_m, yw_m (float32 LE).
+    Pushes decoded tuples into out_q for the UI thread to consume.
 
+    (Connection logic unchanged)
+    """
     while not stop_flag.is_set():
         try:
-            chunk = ser.read(RECV_CHUNK)  # b"" on timeout
-            if not chunk:
+            data = ser.read(TELEM_SIZE)
+            if len(data) != TELEM_SIZE:
                 continue
 
-            buf.extend(chunk)
-
-            while len(buf) >= TELEM_SIZE:
-                frame = bytes(buf[:TELEM_SIZE])
-                del buf[:TELEM_SIZE]
-
-                try:
-                    direction_deg, xw_m, yw_m = struct.unpack(TELEM_FMT, frame)
-                    out_q.put((direction_deg, xw_m, yw_m))
-                except struct.error as e:
-                    # misalignment -> flush and resync
-                    out_q.put(("__LOG__", f"Telemetry unpack error (resync): {e}"))
-                    try:
-                        ser.reset_input_buffer()
-                    except Exception:
-                        pass
-                    buf.clear()
-                    break
+            direction_deg, x_m, y_m = struct.unpack(TELEM_FMT, data)
+            out_q.put((direction_deg, x_m, y_m))
 
         except (serial.SerialException, OSError) as e:
             out_q.put(("__ERROR__", str(e), 0.0))
             break
-        except Exception as e:
-            out_q.put(("__ERROR__", str(e), 0.0))
-            break
+        except struct.error:
+            # Possible misalignment: flush and continue
+            try:
+                ser.reset_input_buffer()
+            except Exception:
+                pass
 
     out_q.put(("__STOP__", 0.0, 0.0))
-    out_q.put(("__LOG__", "RX thread stopped."))
 
 
-class ESP32ControllerUI:
+class TelemetryUI:
     """
-    Single app that does BOTH over a Bluetooth SPP COM port (pyserial):
-
-      PC -> ESP32: single-char commands (ASCII)
-        'l' : turn left
-        'r' : turn right
-        's' : straight/run
-        'c' : calibrate+STOP
-        '0'..'9' : amplitude = digit*5 deg
-        '+' / '-' : amplitude +/- 5 deg
-
-      ESP32 -> PC: telemetry frames (binary, fixed 12 bytes)
-        struct.pack("<fff", direction_deg, xw_m, yw_m)
+    Same connection logic as original,
+    UI behavior matches the PyBluez version:
+      - Amp +/- never greyed out (updates target even if disconnected)
+      - D-pad knob draggable even if disconnected (only sends when connected)
     """
 
     def __init__(self, root: tk.Tk):
         self.root = root
-        self.root.title("ESP32 Snake D-pad + Telemetry + Amp (+/-) (COM Port)")
-        self.root.geometry("760x720")
+        self.root.title("ESP32 Snake — D-pad + Telemetry + Amp (+/-) (COM Port)")
+        self.root.geometry("760x760")
 
-        self.ser: serial.Serial | None = None
+        self.ser = None
+        self.stop_flag = threading.Event()
+        self.rx_thread = None
+        self.q = queue.Queue()
+
         self.connected = False
         self.sending_lock = threading.Lock()
 
-        # RX thread state (queue-based)
-        self.rx_thread = None
-        self.rx_stop = threading.Event()
-        self.rx_q: queue.Queue = queue.Queue()
-
-        # D-pad send throttling (avoid spamming)
+        # D-pad send throttling
         self.last_dpad_cmd = None
         self.last_cmd_time = 0.0
-        self.hold_resend_sec = 0.15  # allow resend while holding direction
+        self.hold_resend_sec = 0.15
 
-        # PC-side notion of amplitude target (just for display)
+        # Amp display (PC-side notion)
         self.amp_min = 0
         self.amp_max = 60
         self.amp_step = 5
         self.amp_target = 30
+
+        # -------- UI Variables --------
+        self.port_var = tk.StringVar(value=PORT)
+        self.baud_var = tk.IntVar(value=BAUD)
+
+        self.dir_var = tk.StringVar(value="—")
+        self.x_var = tk.StringVar(value="—")
+        self.y_var = tk.StringVar(value="—")
+        self.last_rx_var = tk.StringVar(value="Never")
+
+        self.status_var = tk.StringVar(value="Not connected.")
 
         # ===== Connection UI =====
         conn = ttk.LabelFrame(root, text="Connection (Serial / SPP COM port)")
         conn.pack(fill="x", padx=10, pady=10)
 
         ttk.Label(conn, text="COM Port:").grid(row=0, column=0, sticky="w", padx=8, pady=6)
-        self.port_var = tk.StringVar(value=DEFAULT_COM_PORT)
         self.port_entry = ttk.Entry(conn, textvariable=self.port_var, width=16)
         self.port_entry.grid(row=0, column=1, sticky="w", padx=8, pady=6)
 
         ttk.Label(conn, text="Baud:").grid(row=0, column=2, sticky="w", padx=8, pady=6)
-        self.baud_var = tk.IntVar(value=DEFAULT_BAUD)
         self.baud_entry = ttk.Entry(conn, textvariable=self.baud_var, width=10)
         self.baud_entry.grid(row=0, column=3, sticky="w", padx=8, pady=6)
 
-        self.connect_btn = ttk.Button(conn, text="Connect", command=self.connect_async)
-        self.connect_btn.grid(row=1, column=1, sticky="ew", padx=8, pady=8)
+        self.btn_connect = ttk.Button(conn, text="Connect", command=self.connect)
+        self.btn_connect.grid(row=1, column=1, sticky="ew", padx=8, pady=8)
 
-        self.disconnect_btn = ttk.Button(conn, text="Disconnect", command=self.disconnect, state="disabled")
-        self.disconnect_btn.grid(row=1, column=2, sticky="ew", padx=8, pady=8)
+        self.btn_disconnect = ttk.Button(conn, text="Disconnect", command=self.disconnect, state="disabled")
+        self.btn_disconnect.grid(row=1, column=2, sticky="ew", padx=8, pady=8)
 
         conn.columnconfigure(1, weight=1)
         conn.columnconfigure(2, weight=1)
 
-        self.status_var = tk.StringVar(value="Not connected.")
         ttk.Label(root, textvariable=self.status_var).pack(anchor="w", padx=12)
 
         # ===== Telemetry Panel =====
-        self.dir_var = tk.StringVar(value="—")
-        self.xw_var = tk.StringVar(value="—")
-        self.yw_var = tk.StringVar(value="—")
-        self.last_rx_var = tk.StringVar(value="Never")
-
         telem = ttk.LabelFrame(root, text="Telemetry (ESP32 → PC, 12 bytes/frame)")
         telem.pack(fill="x", padx=10, pady=10)
 
@@ -144,11 +125,11 @@ class ESP32ControllerUI:
         ttk.Label(grid, text="Direction (deg):").grid(row=0, column=0, sticky="w", padx=6, pady=4)
         ttk.Label(grid, textvariable=self.dir_var, width=14).grid(row=0, column=1, sticky="w", padx=6, pady=4)
 
-        ttk.Label(grid, text="Xw (m):").grid(row=0, column=2, sticky="w", padx=6, pady=4)
-        ttk.Label(grid, textvariable=self.xw_var, width=14).grid(row=0, column=3, sticky="w", padx=6, pady=4)
+        ttk.Label(grid, text="X (m):").grid(row=0, column=2, sticky="w", padx=6, pady=4)
+        ttk.Label(grid, textvariable=self.x_var, width=14).grid(row=0, column=3, sticky="w", padx=6, pady=4)
 
-        ttk.Label(grid, text="Yw (m):").grid(row=0, column=4, sticky="w", padx=6, pady=4)
-        ttk.Label(grid, textvariable=self.yw_var, width=14).grid(row=0, column=5, sticky="w", padx=6, pady=4)
+        ttk.Label(grid, text="Y (m):").grid(row=0, column=4, sticky="w", padx=6, pady=4)
+        ttk.Label(grid, textvariable=self.y_var, width=14).grid(row=0, column=5, sticky="w", padx=6, pady=4)
 
         ttk.Label(grid, text="Last RX:").grid(row=1, column=0, sticky="w", padx=6, pady=4)
         ttk.Label(grid, textvariable=self.last_rx_var).grid(row=1, column=1, columnspan=5, sticky="w", padx=6, pady=4)
@@ -156,7 +137,7 @@ class ESP32ControllerUI:
         for c in range(6):
             grid.columnconfigure(c, weight=1)
 
-        # ===== Amplitude controls (+ / - and digits) =====
+        # ===== Amplitude controls =====
         amp_frame = ttk.LabelFrame(root, text="Amplitude (sends 0..9, +, - to ESP32)")
         amp_frame.pack(fill="x", padx=10, pady=10)
 
@@ -167,6 +148,7 @@ class ESP32ControllerUI:
         ttk.Label(row, text="Target Amp (deg):").pack(side="left")
         ttk.Label(row, textvariable=self.amp_var, width=6).pack(side="left", padx=(6, 20))
 
+        # NOTE: NOT greyed out anymore (matches PyBluez UI)
         self.amp_minus_btn = ttk.Button(row, text="Amp -", command=self._amp_minus)
         self.amp_minus_btn.pack(side="left", padx=6)
 
@@ -178,7 +160,7 @@ class ESP32ControllerUI:
             text="Keyboard: '+' / '-' (also keypad +/-). Digits 0..9 set amp to digit*5 deg.",
         ).pack(anchor="w", padx=10, pady=(0, 10))
 
-        # ===== D-pad Only =====
+        # ===== D-pad =====
         dpad_frame = ttk.LabelFrame(root, text="D-pad (movement control)")
         dpad_frame.pack(fill="x", padx=10, pady=10)
 
@@ -203,7 +185,7 @@ class ESP32ControllerUI:
         self.cx, self.cy = 160, 160
         self.base_r = 130
         self.knob_r = 22
-        self.deadzone_px = 25  # "middle does nothing"
+        self.deadzone_px = 25
 
         self.canvas.create_oval(
             self.cx - self.base_r, self.cy - self.base_r,
@@ -220,7 +202,8 @@ class ESP32ControllerUI:
         )
 
         self.dragging = False
-        self.canvas.bind("<Button-1>", self.on_canvas_click)
+        # Use ButtonPress-1 for best consistency
+        self.canvas.bind("<ButtonPress-1>", self.on_canvas_click)
         self.canvas.bind("<B1-Motion>", self.on_canvas_drag)
         self.canvas.bind("<ButtonRelease-1>", self.on_canvas_release)
 
@@ -232,109 +215,95 @@ class ESP32ControllerUI:
         self.log.pack(fill="both", expand=True, padx=8, pady=8)
         self.log.configure(state="disabled")
 
-        # ===== Key binds =====
-        root.bind("<Escape>", lambda e: self.disconnect())
-        root.bind("<Key>", self.on_key)
+        # Key binds
+        self.root.bind("<Escape>", lambda e: self.disconnect())
+        self.root.bind("<Key>", self.on_key)
 
-        root.protocol("WM_DELETE_WINDOW", self.on_close)
+        # Poll telemetry
+        self.root.after(50, self._poll_queue)
 
-        # Poll telemetry queue
-        self.root.after(50, self._poll_rx_queue)
+        # Proper close
+        self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
     # ---------------- Logging ----------------
-
     def append_log(self, msg: str):
         self.log.configure(state="normal")
         self.log.insert("end", msg + "\n")
         self.log.see("end")
         self.log.configure(state="disabled")
 
-    def set_connected_ui(self, is_connected: bool):
-        self.connected = is_connected
-        self.connect_btn.configure(state="disabled" if is_connected else "normal")
-        self.disconnect_btn.configure(state="normal" if is_connected else "disabled")
-
-        if not is_connected:
+    def _set_connected_ui(self, connected: bool):
+        self.connected = connected
+        self.btn_connect.config(state="disabled" if connected else "normal")
+        self.btn_disconnect.config(state="normal" if connected else "disabled")
+        if not connected:
             self.last_dpad_cmd = None
             self.last_cmd_time = 0.0
 
-    # ---------------- Serial connect/disconnect ----------------
-
-    def connect_async(self):
-        if self.connected:
+    # ---------------- Connection logic (UNCHANGED) ----------------
+    def connect(self):
+        if self.ser is not None:
             return
 
         port = self.port_var.get().strip()
-        try:
-            baud = int(self.baud_var.get())
-        except Exception:
-            messagebox.showerror("Error", "Baud must be an integer.")
-            return
-
         if not port:
-            messagebox.showerror("Error", "Please enter a COM port (e.g., COM10).")
+            messagebox.showerror("Error", "Please enter a COM port (e.g., COM11).")
             return
 
-        self.status_var.set(f"Connecting to {port} @ {baud}...")
-        self.append_log(f"Trying to open {port} @ {baud}...")
-        self.connect_btn.configure(state="disabled")
+        try:
+            self.ser = serial.Serial(port, BAUD, timeout=READ_TIMEOUT)
+            time.sleep(0.2)
+        except Exception as e:
+            self.ser = None
+            messagebox.showerror("Connection Failed", f"Could not open {port}\n\n{e}")
+            self._set_connected_ui(False)
+            self.status_var.set("Not connected.")
+            return
 
-        def worker():
-            try:
-                ser = serial.Serial(port, baud, timeout=READ_TIMEOUT)
-                time.sleep(0.2)
-                self.ser = ser
-                self.root.after(0, lambda: self.on_connected(port, baud))
-            except Exception as e:
-                self.root.after(0, lambda err=e: self.on_connect_failed(err))
-
-        threading.Thread(target=worker, daemon=True).start()
-
-    def on_connected(self, port: str, baud: int):
-        self.set_connected_ui(True)
-        self.status_var.set(f"Connected to {port} @ {baud}.")
-        self.append_log("Connected!")
-
-        # Start RX telemetry thread (queue-based)
-        self.rx_stop.clear()
-        self.rx_thread = threading.Thread(target=rx_loop, args=(self.ser, self.rx_stop, self.rx_q), daemon=True)
+        self.stop_flag.clear()
+        self.rx_thread = threading.Thread(target=rx_loop, args=(self.ser, self.stop_flag, self.q), daemon=True)
         self.rx_thread.start()
 
-    def on_connect_failed(self, e: Exception):
-        self.ser = None
-        self.set_connected_ui(False)
-        self.status_var.set("Not connected.")
-        self.append_log(f"Failed to connect: {e}")
-        messagebox.showerror("Connection failed", str(e))
+        self.status_var.set(f"Connected to {port}")
+        self.append_log(f"Connected to {port}")
+        self._set_connected_ui(True)
 
     def disconnect(self):
-        if not self.connected:
+        if self.ser is None:
             return
 
         self.append_log("Disconnecting...")
-        self.rx_stop.set()
+        self.stop_flag.set()
+        time.sleep(0.1)
 
         try:
-            if self.ser:
-                try:
-                    self.ser.close()
-                except Exception:
-                    pass
-        finally:
-            self.ser = None
-            self.set_connected_ui(False)
-            self.status_var.set("Not connected.")
-            self.append_log("Disconnected.")
+            self.ser.close()
+        except Exception:
+            pass
+
+        self.ser = None
+        self.status_var.set("Not connected.")
+        self.append_log("Disconnected.")
+        self._set_connected_ui(False)
 
     # ---------------- Sending ----------------
+    def send_one_byte(self, c: str, log: bool = True):
+        if self.ser is None:
+            return
+        try:
+            self.ser.write(c.encode("utf-8"))
+            if log:
+                self.append_log(f"Sent cmd: {c}")
+        except Exception as e:
+            messagebox.showerror("Send Failed", str(e))
 
     def _send_cmd_char(self, ch: str):
+        # Match PyBluez UI behavior: if not connected, just do nothing
         if not self.connected or not self.ser:
             return
         if not ch or len(ch) != 1:
             return
 
-        # Throttle ONLY for D-pad repeats (l/r/s/c). For +/- and digits, send always.
         dpad_cmds = {'l', 'r', 's', 'c'}
         now = time.time()
         if ch in dpad_cmds:
@@ -345,72 +314,33 @@ class ESP32ControllerUI:
 
         def worker():
             with self.sending_lock:
-                try:
-                    self.ser.write(ch.encode("ascii"))
-                    self.root.after(0, lambda: self.append_log(f"Sent cmd: {ch}"))
-                except Exception as e:
-                    self.root.after(0, lambda: self.append_log(f"Send failed: {e}"))
-                    self.root.after(0, self.disconnect)
+                self.send_one_byte(ch, log=True)
 
         threading.Thread(target=worker, daemon=True).start()
 
     # ---------------- Amplitude helpers ----------------
-
     def _set_amp_target(self, amp: int):
         amp = max(self.amp_min, min(self.amp_max, amp))
         self.amp_target = amp
         self.amp_var.set(str(self.amp_target))
 
     def _amp_plus(self):
-        self._send_cmd_char('+')
+        # Update display regardless of connection (matches PyBluez UI feel)
         self._set_amp_target(self.amp_target + self.amp_step)
+        # Send only if connected
+        self._send_cmd_char('+')
 
     def _amp_minus(self):
-        self._send_cmd_char('-')
         self._set_amp_target(self.amp_target - self.amp_step)
+        self._send_cmd_char('-')
 
     def _amp_digit(self, d: int):
-        self._send_cmd_char(str(d))
         self._set_amp_target(d * 5)
-
-    # ---------------- Receiving telemetry (queue poll) ----------------
-
-    def _poll_rx_queue(self):
-        try:
-            while True:
-                item = self.rx_q.get_nowait()
-
-                if isinstance(item, tuple) and len(item) == 3 and item[0] == "__ERROR__":
-                    self.append_log(f"RX serial error: {item[1]}")
-                    self.disconnect()
-                    break
-
-                if isinstance(item, tuple) and len(item) == 3 and item[0] == "__STOP__":
-                    break
-
-                if isinstance(item, tuple) and len(item) == 2 and item[0] == "__LOG__":
-                    self.append_log(str(item[1]))
-                    continue
-
-                direction_deg, xw_m, yw_m = item
-                self._update_telem_ui(direction_deg, xw_m, yw_m)
-
-        except queue.Empty:
-            pass
-
-        self.root.after(50, self._poll_rx_queue)
-
-    def _update_telem_ui(self, direction_deg: float, xw_m: float, yw_m: float):
-        self.dir_var.set(f"{direction_deg:.2f}")
-        self.xw_var.set(f"{xw_m:.3f}")
-        self.yw_var.set(f"{yw_m:.3f}")
-        self.last_rx_var.set(time.strftime("%H:%M:%S"))
+        self._send_cmd_char(str(d))
 
     # ---------------- Key handling ----------------
-
     def on_key(self, event: tk.Event):
         ch = event.char
-
         if ch == '+':
             self._amp_plus()
             return
@@ -429,8 +359,33 @@ class ESP32ControllerUI:
             self._amp_minus()
             return
 
-    # ---------------- D-pad drawing ----------------
+    # ---------------- Receiving telemetry ----------------
+    def _poll_queue(self):
+        try:
+            while True:
+                item = self.q.get_nowait()
 
+                if isinstance(item, tuple) and len(item) == 3 and item[0] == "__ERROR__":
+                    self.status_var.set(f"Serial error: {item[1]}")
+                    self.append_log(f"Serial error: {item[1]}")
+                    self.disconnect()
+                    break
+
+                if isinstance(item, tuple) and len(item) == 3 and item[0] == "__STOP__":
+                    break
+
+                direction_deg, x_m, y_m = item
+                self.dir_var.set(f"{direction_deg:0.2f}")
+                self.x_var.set(f"{x_m:0.4f}")
+                self.y_var.set(f"{y_m:0.4f}")
+                self.last_rx_var.set(time.strftime("%H:%M:%S"))
+
+        except queue.Empty:
+            pass
+
+        self.root.after(50, self._poll_queue)
+
+    # ---------------- D-pad drawing ----------------
     def _draw_arrows(self):
         arrow_r_outer = self.base_r - 10
         arrow_r_inner = self.base_r - 45
@@ -439,26 +394,23 @@ class ESP32ControllerUI:
         def tri(points, tag):
             return self.canvas.create_polygon(points, fill="#f2f2f2", outline="#777", width=2, tags=(tag,))
 
-        up_tip = (self.cx, self.cy - arrow_r_outer)
-        up_left = (self.cx - w, self.cy - arrow_r_inner)
-        up_right = (self.cx + w, self.cy - arrow_r_inner)
-        tri([up_tip, up_left, up_right], "arrow_up")
+        tri([(self.cx, self.cy - arrow_r_outer),
+             (self.cx - w, self.cy - arrow_r_inner),
+             (self.cx + w, self.cy - arrow_r_inner)], "arrow_up")
 
-        rt_tip = (self.cx + arrow_r_outer, self.cy)
-        rt_up = (self.cx + arrow_r_inner, self.cy - w)
-        rt_dn = (self.cx + arrow_r_inner, self.cy + w)
-        tri([rt_tip, rt_up, rt_dn], "arrow_right")
+        tri([(self.cx + arrow_r_outer, self.cy),
+             (self.cx + arrow_r_inner, self.cy - w),
+             (self.cx + arrow_r_inner, self.cy + w)], "arrow_right")
 
-        dn_tip = (self.cx, self.cy + arrow_r_outer)
-        dn_left = (self.cx - w, self.cy + arrow_r_inner)
-        dn_right = (self.cx + w, self.cy + arrow_r_inner)
-        tri([dn_tip, dn_left, dn_right], "arrow_down")
+        tri([(self.cx, self.cy + arrow_r_outer),
+             (self.cx - w, self.cy + arrow_r_inner),
+             (self.cx + w, self.cy + arrow_r_inner)], "arrow_down")
 
-        lf_tip = (self.cx - arrow_r_outer, self.cy)
-        lf_up = (self.cx - arrow_r_inner, self.cy - w)
-        lf_dn = (self.cx - arrow_r_inner, self.cy + w)
-        tri([lf_tip, lf_up, lf_dn], "arrow_left")
+        tri([(self.cx - arrow_r_outer, self.cy),
+             (self.cx - arrow_r_inner, self.cy - w),
+             (self.cx - arrow_r_inner, self.cy + w)], "arrow_left")
 
+        # Clicking arrows moves knob regardless; sends only if connected
         self.canvas.tag_bind("arrow_up", "<Button-1>", lambda e: self._arrow_click("up"))
         self.canvas.tag_bind("arrow_right", "<Button-1>", lambda e: self._arrow_click("right"))
         self.canvas.tag_bind("arrow_down", "<Button-1>", lambda e: self._arrow_click("down"))
@@ -466,20 +418,19 @@ class ESP32ControllerUI:
 
     def _arrow_click(self, direction: str):
         if direction == "left":
-            self._send_cmd_char('l')
             self._set_knob_from_normalized(-1.0, 0.0)
+            self._send_cmd_char('l')
         elif direction == "right":
-            self._send_cmd_char('r')
             self._set_knob_from_normalized(1.0, 0.0)
+            self._send_cmd_char('r')
         elif direction == "up":
-            self._send_cmd_char('s')
             self._set_knob_from_normalized(0.0, 1.0)
+            self._send_cmd_char('s')
         elif direction == "down":
-            self._send_cmd_char('c')
             self._set_knob_from_normalized(0.0, -1.0)
+            self._send_cmd_char('c')
 
     # ---------------- D-pad interactions ----------------
-
     def on_canvas_click(self, event):
         dx, dy = event.x - self.cx, event.y - self.cy
         if math.hypot(dx, dy) <= self.base_r:
@@ -550,13 +501,21 @@ class ESP32ControllerUI:
         self._send_cmd_char(cmd)
 
     # ---------------- Close ----------------
-
     def on_close(self):
         self.disconnect()
         self.root.destroy()
 
 
-if __name__ == "__main__":
+def main():
     root = tk.Tk()
-    app = ESP32ControllerUI(root)
+    try:
+        ttk.Style().theme_use("clam")
+    except Exception:
+        pass
+
+    TelemetryUI(root)
     root.mainloop()
+
+
+if __name__ == "__main__":
+    main()
