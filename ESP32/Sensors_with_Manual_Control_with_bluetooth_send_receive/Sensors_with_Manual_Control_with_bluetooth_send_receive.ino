@@ -97,7 +97,8 @@ static float theta_deg  = 0.0f;
 static float theta_rad  = 0.0f;
 
 // Placeholder scale
-static const float meters_per_count = 1.0f / 60.0f;
+// static const float meters_per_count = 1.0f / 60.0f;
+static const float meters_per_count = 1.0f / 108.0f;
 
 // =====================================================
 // Telemetry timing
@@ -170,8 +171,8 @@ static void processCommand(char c) {
   if (c == 'c' || c == 'C') {
     targetTurnOffsetDeg  = 0.0f;
     currentTurnOffsetDeg = 0.0f;
-    targetAmplitudeDeg   = 0.0f;
-    currentAmplitudeDeg  = 0.0f;
+    //targetAmplitudeDeg   = 0.0f;
+    //currentAmplitudeDeg  = 0.0f;
     calibrateToCenter();
     motionEnabled = false;
 
