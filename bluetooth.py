@@ -7,9 +7,6 @@ import serial
 import tkinter as tk
 from tkinter import ttk, messagebox
 
-# =========================
-# Configure these (DON'T CHANGE LOGIC)
-# =========================
 PORT = "COM11"      # <-- your Bluetooth SPP COM port
 BAUD = 115200       # SPP often ignores baud, but keep consistent
 READ_TIMEOUT = 0.2  # seconds
