@@ -7,7 +7,7 @@ import serial
 import tkinter as tk
 from tkinter import ttk, messagebox
 
-PORT = "COM11"      # <-- your Bluetooth SPP COM port
+PORT = "COM4"      # <-- your Bluetooth SPP COM port
 BAUD = 115200       # SPP often ignores baud, but keep consistent
 READ_TIMEOUT = 0.2  # seconds
 
@@ -122,10 +122,10 @@ class TelemetryUI:
         ttk.Label(grid, text="Direction (deg):").grid(row=0, column=0, sticky="w", padx=6, pady=4)
         ttk.Label(grid, textvariable=self.dir_var, width=14).grid(row=0, column=1, sticky="w", padx=6, pady=4)
 
-        ttk.Label(grid, text="X (m):").grid(row=0, column=2, sticky="w", padx=6, pady=4)
+        ttk.Label(grid, text="X (cm):").grid(row=0, column=2, sticky="w", padx=6, pady=4)
         ttk.Label(grid, textvariable=self.x_var, width=14).grid(row=0, column=3, sticky="w", padx=6, pady=4)
 
-        ttk.Label(grid, text="Y (m):").grid(row=0, column=4, sticky="w", padx=6, pady=4)
+        ttk.Label(grid, text="Y (cm):").grid(row=0, column=4, sticky="w", padx=6, pady=4)
         ttk.Label(grid, textvariable=self.y_var, width=14).grid(row=0, column=5, sticky="w", padx=6, pady=4)
 
         ttk.Label(grid, text="Last RX:").grid(row=1, column=0, sticky="w", padx=6, pady=4)
