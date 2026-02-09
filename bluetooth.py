@@ -7,7 +7,7 @@ import serial
 import tkinter as tk
 from tkinter import ttk, messagebox
 
-PORT = "COM4"      # <-- your Bluetooth SPP COM port
+PORT = "COM11"      # <-- your Bluetooth SPP COM port
 BAUD = 115200       # SPP often ignores baud, but keep consistent
 READ_TIMEOUT = 0.2  # seconds
 
@@ -52,12 +52,19 @@ class TelemetryUI:
     UI behavior matches the PyBluez version:
       - Amp +/- never greyed out (updates target even if disconnected)
       - D-pad knob draggable even if disconnected (only sends when connected)
+
+    NEW:
+      - Mode panel next to amplitude:
+          * Manual: D-pad active
+          * Automatic: D-pad greyed out/disabled
+            - submode Angle: send "A120"
+            - submode Coords: send "X100" and/or "Y200"
     """
 
     def __init__(self, root: tk.Tk):
         self.root = root
         self.root.title("ESP32 Snake — D-pad + Telemetry + Amp (+/-) (COM Port)")
-        self.root.geometry("760x760")
+        self.root.geometry("900x780")
 
         self.ser = None
         self.stop_flag = threading.Event()
@@ -134,9 +141,17 @@ class TelemetryUI:
         for c in range(6):
             grid.columnconfigure(c, weight=1)
 
+        # =========================
+        # Amp + Mode panels (side-by-side)
+        # =========================
+        top_controls = ttk.Frame(root)
+        top_controls.pack(fill="x", padx=10, pady=10)
+        top_controls.columnconfigure(0, weight=1)
+        top_controls.columnconfigure(1, weight=1)
+
         # ===== Amplitude controls =====
-        amp_frame = ttk.LabelFrame(root, text="Amplitude (sends 0..9, +, - to ESP32)")
-        amp_frame.pack(fill="x", padx=10, pady=10)
+        amp_frame = ttk.LabelFrame(top_controls, text="Amplitude (sends 0..9, +, - to ESP32)")
+        amp_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
 
         row = ttk.Frame(amp_frame)
         row.pack(fill="x", padx=10, pady=10)
@@ -157,21 +172,106 @@ class TelemetryUI:
             text="Keyboard: '+' / '-' (also keypad +/-). Digits 0..9 set amp to digit*5 deg.",
         ).pack(anchor="w", padx=10, pady=(0, 10))
 
+        # ===== Mode panel (NEW) =====
+        mode_frame = ttk.LabelFrame(top_controls, text="Control Mode (Manual / Automatic)")
+        mode_frame.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
+
+        self.control_mode_var = tk.StringVar(value="manual")  # "manual" or "auto"
+        self.auto_submode_var = tk.StringVar(value="angle")   # "angle" or "coords"
+
+        # Mode selector
+        mode_row = ttk.Frame(mode_frame)
+        mode_row.pack(fill="x", padx=10, pady=(10, 6))
+
+        ttk.Radiobutton(
+            mode_row, text="Manual (D-pad)", value="manual",
+            variable=self.control_mode_var, command=self._on_mode_change
+        ).pack(side="left", padx=(0, 16))
+
+        ttk.Radiobutton(
+            mode_row, text="Automatic", value="auto",
+            variable=self.control_mode_var, command=self._on_mode_change
+        ).pack(side="left")
+
+        ttk.Separator(mode_frame).pack(fill="x", padx=10, pady=8)
+
+        # Submode selector
+        sub_row = ttk.Frame(mode_frame)
+        sub_row.pack(fill="x", padx=10, pady=(0, 6))
+
+        ttk.Label(sub_row, text="Auto sub-mode:").pack(side="left", padx=(0, 8))
+
+        self.rb_angle = ttk.Radiobutton(
+            sub_row, text="Angle", value="angle",
+            variable=self.auto_submode_var, command=self._on_auto_submode_change
+        )
+        self.rb_angle.pack(side="left", padx=(0, 10))
+
+        self.rb_coords = ttk.Radiobutton(
+            sub_row, text="Coords", value="coords",
+            variable=self.auto_submode_var, command=self._on_auto_submode_change
+        )
+        self.rb_coords.pack(side="left")
+
+        # Angle panel
+        self.angle_box = ttk.Frame(mode_frame)
+        self.angle_box.pack(fill="x", padx=10, pady=(6, 0))
+
+        angle_in = ttk.Frame(self.angle_box)
+        angle_in.pack(fill="x")
+
+        ttk.Label(angle_in, text="Angle (deg):").pack(side="left")
+        self.angle_var = tk.StringVar(value="120")
+        self.angle_entry = ttk.Entry(angle_in, textvariable=self.angle_var, width=10)
+        self.angle_entry.pack(side="left", padx=8)
+
+        self.btn_send_angle = ttk.Button(angle_in, text="Send Angle", command=self._send_angle)
+        self.btn_send_angle.pack(side="left")
+
+        ttk.Label(
+            self.angle_box,
+            text="Sends: A<angle>  (example: A120)",
+        ).pack(anchor="w", pady=(6, 0))
+
+        # Coords panel
+        self.coords_box = ttk.Frame(mode_frame)
+        self.coords_box.pack(fill="x", padx=10, pady=(10, 0))
+
+        coords_in1 = ttk.Frame(self.coords_box)
+        coords_in1.pack(fill="x", pady=(0, 6))
+
+        ttk.Label(coords_in1, text="X:").pack(side="left")
+        self.xcmd_var = tk.StringVar(value="100")
+        self.xcmd_entry = ttk.Entry(coords_in1, textvariable=self.xcmd_var, width=10)
+        self.xcmd_entry.pack(side="left", padx=8)
+        self.btn_send_x = ttk.Button(coords_in1, text="Send X", command=self._send_x)
+        self.btn_send_x.pack(side="left")
+
+        coords_in2 = ttk.Frame(self.coords_box)
+        coords_in2.pack(fill="x")
+
+        ttk.Label(coords_in2, text="Y:").pack(side="left")
+        self.ycmd_var = tk.StringVar(value="200")
+        self.ycmd_entry = ttk.Entry(coords_in2, textvariable=self.ycmd_var, width=10)
+        self.ycmd_entry.pack(side="left", padx=8)
+        self.btn_send_y = ttk.Button(coords_in2, text="Send Y", command=self._send_y)
+        self.btn_send_y.pack(side="left")
+
+        self.btn_send_xy = ttk.Button(self.coords_box, text="Send X then Y", command=self._send_xy)
+        self.btn_send_xy.pack(anchor="w", pady=(8, 0))
+
+        ttk.Label(
+            mode_frame,
+            text="Coords sends: X<val> and Y<val>  (examples: X100, Y200)",
+        ).pack(anchor="w", padx=10, pady=(10, 10))
+
         # ===== D-pad =====
         dpad_frame = ttk.LabelFrame(root, text="D-pad (movement control)")
         dpad_frame.pack(fill="x", padx=10, pady=10)
 
         ttk.Label(
             dpad_frame,
-            text=(
-                "Drag mapping:\n"
-                "  • Drag LEFT  → 'l' (turn left)\n"
-                "  • Drag RIGHT → 'r' (turn right)\n"
-                "  • Drag UP    → 's' (straight/run)\n"
-                "  • Drag DOWN  → 'c' (calibrate+STOP)\n"
-                "  • Middle (deadzone) → does nothing\n"
-                "Release → snaps to center, does nothing."
-            ),
+            text=(),
             justify="left",
         ).pack(anchor="w", padx=10, pady=(6, 0))
 
@@ -184,12 +284,15 @@ class TelemetryUI:
         self.knob_r = 22
         self.deadzone_px = 25
 
-        self.canvas.create_oval(
+        self.dpad_enabled = True  # toggled by mode switch
+
+        self.base_circle = self.canvas.create_oval(
             self.cx - self.base_r, self.cy - self.base_r,
             self.cx + self.base_r, self.cy + self.base_r,
             outline="#999", width=3
         )
 
+        self.arrow_ids = []
         self._draw_arrows()
 
         self.knob = self.canvas.create_oval(
@@ -199,7 +302,6 @@ class TelemetryUI:
         )
 
         self.dragging = False
-        # Use ButtonPress-1 for best consistency
         self.canvas.bind("<ButtonPress-1>", self.on_canvas_click)
         self.canvas.bind("<B1-Motion>", self.on_canvas_drag)
         self.canvas.bind("<ButtonRelease-1>", self.on_canvas_release)
@@ -221,6 +323,9 @@ class TelemetryUI:
 
         # Proper close
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
+
+        # Initialize mode UI state
+        self._on_mode_change()
 
     # ---------------- Logging ----------------
     def append_log(self, msg: str):
@@ -284,6 +389,16 @@ class TelemetryUI:
         self._set_connected_ui(False)
 
     # ---------------- Sending ----------------
+    def send_bytes(self, b: bytes, log_msg: str | None = None):
+        if self.ser is None:
+            return
+        try:
+            self.ser.write(b)
+            if log_msg:
+                self.append_log(log_msg)
+        except Exception as e:
+            messagebox.showerror("Send Failed", str(e))
+
     def send_one_byte(self, c: str, log: bool = True):
         if self.ser is None:
             return
@@ -312,6 +427,24 @@ class TelemetryUI:
         def worker():
             with self.sending_lock:
                 self.send_one_byte(ch, log=True)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _send_cmd_text(self, text: str):
+        """
+        Send multi-byte ASCII commands like A120 / X100 / Y200.
+        Does nothing if not connected (consistent behavior).
+        """
+        if not self.connected or not self.ser:
+            return
+        if not text:
+            return
+
+        payload = text.encode("utf-8")
+
+        def worker():
+            with self.sending_lock:
+                self.send_bytes(payload, log_msg=f"Sent cmd: {text}")
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -382,6 +515,94 @@ class TelemetryUI:
 
         self.root.after(50, self._poll_queue)
 
+    # ---------------- Mode panel logic (NEW) ----------------
+    def _on_mode_change(self):
+        mode = self.control_mode_var.get()
+        auto = (mode == "auto")
+
+        # D-pad enabled only in manual
+        self.dpad_enabled = not auto
+        self._apply_dpad_visual_state()
+
+        # Auto widgets enabled only in auto
+        state_auto = "normal" if auto else "disabled"
+        self.rb_angle.config(state=state_auto)
+        self.rb_coords.config(state=state_auto)
+
+        # Enable/disable submode boxes based on auto + selected submode
+        self._on_auto_submode_change()
+
+    def _on_auto_submode_change(self):
+        auto = (self.control_mode_var.get() == "auto")
+        sub = self.auto_submode_var.get()
+
+        # Helper to set state on a list of widgets
+        def set_widgets(widgets, st):
+            for w in widgets:
+                try:
+                    w.config(state=st)
+                except tk.TclError:
+                    pass
+
+        # All auto controls disabled if not in auto
+        if not auto:
+            set_widgets([self.angle_entry, self.btn_send_angle], "disabled")
+            set_widgets([self.xcmd_entry, self.btn_send_x, self.ycmd_entry, self.btn_send_y, self.btn_send_xy], "disabled")
+            return
+
+        # In auto: enable based on submode
+        if sub == "angle":
+            set_widgets([self.angle_entry, self.btn_send_angle], "normal")
+            set_widgets([self.xcmd_entry, self.btn_send_x, self.ycmd_entry, self.btn_send_y, self.btn_send_xy], "disabled")
+        else:
+            set_widgets([self.angle_entry, self.btn_send_angle], "disabled")
+            set_widgets([self.xcmd_entry, self.btn_send_x, self.ycmd_entry, self.btn_send_y, self.btn_send_xy], "normal")
+
+    def _send_angle(self):
+        if self.control_mode_var.get() != "auto" or self.auto_submode_var.get() != "angle":
+            return
+        s = self.angle_var.get().strip()
+        try:
+            ang = int(s)
+        except ValueError:
+            messagebox.showerror("Invalid angle", "Angle must be an integer (e.g., 120).")
+            return
+        # Keep it simple; clamp to [0, 359]
+        ang = max(0, min(359, ang))
+        self.angle_var.set(str(ang))
+        self._send_cmd_text(f"A{ang}")
+
+    def _send_x(self):
+        if self.control_mode_var.get() != "auto" or self.auto_submode_var.get() != "coords":
+            return
+        s = self.xcmd_var.get().strip()
+        try:
+            x = int(s)
+        except ValueError:
+            messagebox.showerror("Invalid X", "X must be an integer (e.g., 100).")
+            return
+        self.xcmd_var.set(str(x))
+        self._send_cmd_text(f"X{x}")
+
+    def _send_y(self):
+        if self.control_mode_var.get() != "auto" or self.auto_submode_var.get() != "coords":
+            return
+        s = self.ycmd_var.get().strip()
+        try:
+            y = int(s)
+        except ValueError:
+            messagebox.showerror("Invalid Y", "Y must be an integer (e.g., 200).")
+            return
+        self.ycmd_var.set(str(y))
+        self._send_cmd_text(f"Y{y}")
+
+    def _send_xy(self):
+        # Send X then Y (two commands)
+        self._send_x()
+        # small spacing can help on some parsers, but keep it minimal and safe
+        time.sleep(0.02)
+        self._send_y()
+
     # ---------------- D-pad drawing ----------------
     def _draw_arrows(self):
         arrow_r_outer = self.base_r - 10
@@ -389,7 +610,9 @@ class TelemetryUI:
         w = 22
 
         def tri(points, tag):
-            return self.canvas.create_polygon(points, fill="#f2f2f2", outline="#777", width=2, tags=(tag,))
+            _id = self.canvas.create_polygon(points, fill="#f2f2f2", outline="#777", width=2, tags=(tag,))
+            self.arrow_ids.append(_id)
+            return _id
 
         tri([(self.cx, self.cy - arrow_r_outer),
              (self.cx - w, self.cy - arrow_r_inner),
@@ -407,13 +630,33 @@ class TelemetryUI:
              (self.cx - arrow_r_inner, self.cy - w),
              (self.cx - arrow_r_inner, self.cy + w)], "arrow_left")
 
-        # Clicking arrows moves knob regardless; sends only if connected
+        # Clicking arrows moves knob regardless; sends only if connected AND manual
         self.canvas.tag_bind("arrow_up", "<Button-1>", lambda e: self._arrow_click("up"))
         self.canvas.tag_bind("arrow_right", "<Button-1>", lambda e: self._arrow_click("right"))
         self.canvas.tag_bind("arrow_down", "<Button-1>", lambda e: self._arrow_click("down"))
         self.canvas.tag_bind("arrow_left", "<Button-1>", lambda e: self._arrow_click("left"))
 
+    def _apply_dpad_visual_state(self):
+        """
+        Grey out D-pad in automatic mode; restore in manual mode.
+        """
+        if self.dpad_enabled:
+            self.canvas.itemconfig(self.base_circle, outline="#999", width=3)
+            for aid in self.arrow_ids:
+                self.canvas.itemconfig(aid, fill="#f2f2f2", outline="#777", width=2)
+            self.canvas.itemconfig(self.knob, fill="#ddd", outline="#666", width=2)
+        else:
+            self._set_knob_center()
+            self.canvas.itemconfig(self.base_circle, outline="#c8c8c8", width=3)
+            for aid in self.arrow_ids:
+                self.canvas.itemconfig(aid, fill="#efefef", outline="#bdbdbd", width=2)
+            self.canvas.itemconfig(self.knob, fill="#f0f0f0", outline="#bdbdbd", width=2)
+
     def _arrow_click(self, direction: str):
+        # In auto mode, ignore all D-pad interactions
+        if not self.dpad_enabled:
+            return
+
         if direction == "left":
             self._set_knob_from_normalized(-1.0, 0.0)
             self._send_cmd_char('l')
@@ -429,17 +672,23 @@ class TelemetryUI:
 
     # ---------------- D-pad interactions ----------------
     def on_canvas_click(self, event):
+        if not self.dpad_enabled:
+            return
         dx, dy = event.x - self.cx, event.y - self.cy
         if math.hypot(dx, dy) <= self.base_r:
             self.dragging = True
             self._update_stick(event.x, event.y, send_now=True)
 
     def on_canvas_drag(self, event):
+        if not self.dpad_enabled:
+            return
         if not self.dragging:
             return
         self._update_stick(event.x, event.y, send_now=True)
 
     def on_canvas_release(self, event):
+        if not self.dpad_enabled:
+            return
         if not self.dragging:
             return
         self.dragging = False
@@ -516,3 +765,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+    
