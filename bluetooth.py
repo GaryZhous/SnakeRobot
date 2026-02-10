@@ -21,8 +21,6 @@ def rx_loop(ser: serial.Serial, stop_flag: threading.Event, out_q: queue.Queue):
     Continuously read telemetry frames from ESP32.
     Each frame is exactly 12 bytes: direction_deg, xw_m, yw_m (float32 LE).
     Pushes decoded tuples into out_q for the UI thread to consume.
-
-    (Connection logic unchanged)
     """
     while not stop_flag.is_set():
         try:
@@ -48,22 +46,28 @@ def rx_loop(ser: serial.Serial, stop_flag: threading.Event, out_q: queue.Queue):
 
 class TelemetryUI:
     """
-    Same connection logic as original,
-    UI behavior matches the PyBluez version:
+    UI:
       - Amp +/- never greyed out (updates target even if disconnected)
-      - D-pad knob draggable even if disconnected (only sends when connected)
+      - D-pad draggable even if disconnected (only sends when connected)
 
-    NEW:
-      - Mode panel next to amplitude:
-          * Manual: D-pad active
-          * Automatic: D-pad greyed out/disabled
-            - submode Angle: send "A120"
-            - submode Coords: send "X100" and/or "Y200"
+    TX protocol (ALL sends are exactly 8 bytes ASCII):
+      1) Mode markers (1 letter + 7 zeros):
+         - Manual:    "M0000000"
+         - Direction: "D0000000"  (auto angle)
+         - Position:  "P0000000"  (auto coords)
+
+      2) Auto payload values (NO leading letter anymore):
+         - Angle value: "00000120"   (8 digits)
+         - X value:     "00000100"
+         - Y value:     "00000200"
+
+      3) D-pad and amp commands remain 1-char header + 7 zeros:
+         - 'l','r','s','c','+','-','0'..'9' -> e.g. "l0000000", "+0000000", "70000000"
     """
 
     def __init__(self, root: tk.Tk):
         self.root = root
-        self.root.title("ESP32 Snake — D-pad + Telemetry + Amp (+/-) (COM Port)")
+        self.root.title("ESP32 Snake — D-pad + Telemetry + Amp (+/-) + Modes (8B cmds)")
         self.root.geometry("900x780")
 
         self.ser = None
@@ -74,7 +78,7 @@ class TelemetryUI:
         self.connected = False
         self.sending_lock = threading.Lock()
 
-        # D-pad send throttling
+        # D-pad send throttling (still applies even with 8B frames)
         self.last_dpad_cmd = None
         self.last_cmd_time = 0.0
         self.hold_resend_sec = 0.15
@@ -150,7 +154,7 @@ class TelemetryUI:
         top_controls.columnconfigure(1, weight=1)
 
         # ===== Amplitude controls =====
-        amp_frame = ttk.LabelFrame(top_controls, text="Amplitude (sends 0..9, +, - to ESP32)")
+        amp_frame = ttk.LabelFrame(top_controls, text="Amplitude (sends 0..9, +, -) — 8B frames")
         amp_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
 
         row = ttk.Frame(amp_frame)
@@ -160,7 +164,6 @@ class TelemetryUI:
         ttk.Label(row, text="Target Amp (deg):").pack(side="left")
         ttk.Label(row, textvariable=self.amp_var, width=6).pack(side="left", padx=(6, 20))
 
-        # NOTE: NOT greyed out anymore (matches PyBluez UI)
         self.amp_minus_btn = ttk.Button(row, text="Amp -", command=self._amp_minus)
         self.amp_minus_btn.pack(side="left", padx=6)
 
@@ -172,14 +175,13 @@ class TelemetryUI:
             text="Keyboard: '+' / '-' (also keypad +/-). Digits 0..9 set amp to digit*5 deg.",
         ).pack(anchor="w", padx=10, pady=(0, 10))
 
-        # ===== Mode panel (NEW) =====
-        mode_frame = ttk.LabelFrame(top_controls, text="Control Mode (Manual / Automatic)")
+        # ===== Mode panel =====
+        mode_frame = ttk.LabelFrame(top_controls, text="Control Mode (Manual / Automatic) — 8B frames")
         mode_frame.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
 
         self.control_mode_var = tk.StringVar(value="manual")  # "manual" or "auto"
         self.auto_submode_var = tk.StringVar(value="angle")   # "angle" or "coords"
 
-        # Mode selector
         mode_row = ttk.Frame(mode_frame)
         mode_row.pack(fill="x", padx=10, pady=(10, 6))
 
@@ -195,7 +197,6 @@ class TelemetryUI:
 
         ttk.Separator(mode_frame).pack(fill="x", padx=10, pady=8)
 
-        # Submode selector
         sub_row = ttk.Frame(mode_frame)
         sub_row.pack(fill="x", padx=10, pady=(0, 6))
 
@@ -213,7 +214,7 @@ class TelemetryUI:
         )
         self.rb_coords.pack(side="left")
 
-        # Angle panel
+        # Angle controls (now sends ONLY 8-digit value)
         self.angle_box = ttk.Frame(mode_frame)
         self.angle_box.pack(fill="x", padx=10, pady=(6, 0))
 
@@ -225,15 +226,15 @@ class TelemetryUI:
         self.angle_entry = ttk.Entry(angle_in, textvariable=self.angle_var, width=10)
         self.angle_entry.pack(side="left", padx=8)
 
-        self.btn_send_angle = ttk.Button(angle_in, text="Send Angle", command=self._send_angle)
+        self.btn_send_angle = ttk.Button(angle_in, text="Send 8-digit value", command=self._send_angle)
         self.btn_send_angle.pack(side="left")
 
         ttk.Label(
             self.angle_box,
-            text="Sends: A<angle>  (example: A120)",
+            text="Sends: 8 digits only (example: 00000120). Mode marker already sent: D0000000",
         ).pack(anchor="w", pady=(6, 0))
 
-        # Coords panel
+        # Coords controls (now sends ONLY 8-digit value per X/Y)
         self.coords_box = ttk.Frame(mode_frame)
         self.coords_box.pack(fill="x", padx=10, pady=(10, 0))
 
@@ -244,7 +245,7 @@ class TelemetryUI:
         self.xcmd_var = tk.StringVar(value="100")
         self.xcmd_entry = ttk.Entry(coords_in1, textvariable=self.xcmd_var, width=10)
         self.xcmd_entry.pack(side="left", padx=8)
-        self.btn_send_x = ttk.Button(coords_in1, text="Send X", command=self._send_x)
+        self.btn_send_x = ttk.Button(coords_in1, text="Send 8-digit X", command=self._send_x)
         self.btn_send_x.pack(side="left")
 
         coords_in2 = ttk.Frame(self.coords_box)
@@ -254,7 +255,7 @@ class TelemetryUI:
         self.ycmd_var = tk.StringVar(value="200")
         self.ycmd_entry = ttk.Entry(coords_in2, textvariable=self.ycmd_var, width=10)
         self.ycmd_entry.pack(side="left", padx=8)
-        self.btn_send_y = ttk.Button(coords_in2, text="Send Y", command=self._send_y)
+        self.btn_send_y = ttk.Button(coords_in2, text="Send 8-digit Y", command=self._send_y)
         self.btn_send_y.pack(side="left")
 
         self.btn_send_xy = ttk.Button(self.coords_box, text="Send X then Y", command=self._send_xy)
@@ -262,11 +263,11 @@ class TelemetryUI:
 
         ttk.Label(
             mode_frame,
-            text="Coords sends: X<val> and Y<val>  (examples: X100, Y200)",
+            text="Sends: 8 digits only (examples: 00000100, 00000200). Mode marker already sent: P0000000",
         ).pack(anchor="w", padx=10, pady=(10, 10))
 
         # ===== D-pad =====
-        dpad_frame = ttk.LabelFrame(root, text="D-pad (movement control)")
+        dpad_frame = ttk.LabelFrame(root, text="D-pad (movement control) — sends 8B frames (l/r/s/c)")
         dpad_frame.pack(fill="x", padx=10, pady=10)
 
         ttk.Label(
@@ -342,7 +343,7 @@ class TelemetryUI:
             self.last_dpad_cmd = None
             self.last_cmd_time = 0.0
 
-    # ---------------- Connection logic (UNCHANGED) ----------------
+    # ---------------- Connection logic ----------------
     def connect(self):
         if self.ser is not None:
             return
@@ -388,31 +389,78 @@ class TelemetryUI:
         self.append_log("Disconnected.")
         self._set_connected_ui(False)
 
-    # ---------------- Sending ----------------
-    def send_bytes(self, b: bytes, log_msg: str | None = None):
-        if self.ser is None:
-            return
-        try:
-            self.ser.write(b)
-            if log_msg:
-                self.append_log(log_msg)
-        except Exception as e:
-            messagebox.showerror("Send Failed", str(e))
-
-    def send_one_byte(self, c: str, log: bool = True):
-        if self.ser is None:
-            return
-        try:
-            self.ser.write(c.encode("utf-8"))
-            if log:
-                self.append_log(f"Sent cmd: {c}")
-        except Exception as e:
-            messagebox.showerror("Send Failed", str(e))
-
-    def _send_cmd_char(self, ch: str):
-        # Match PyBluez UI behavior: if not connected, just do nothing
+    # ---------------- 8-byte sending helpers ----------------
+    def _send_8b_head(self, head: str, value7: int = 0, log: bool = True):
+        """
+        Send exactly 8 bytes:
+          [1 ASCII char][7 ASCII digits]
+        Used for mode markers and 1-char commands (dpad, +/-, digits).
+        Examples:
+          M0000000, D0000000, P0000000, l0000000, +0000000, 70000000
+        """
         if not self.connected or not self.ser:
             return
+        if not head or len(head) != 1:
+            return
+
+        try:
+            v = int(value7)
+        except Exception:
+            v = 0
+        v = max(0, min(9_999_999, v))
+
+        frame = f"{head}{v:07d}"
+        payload = frame.encode("ascii")  # exactly 8 bytes
+
+        def worker():
+            with self.sending_lock:
+                try:
+                    self.ser.write(payload)
+                    if log:
+                        self.append_log(f"Sent 8B cmd: {frame}")
+                except Exception as e:
+                    messagebox.showerror("Send Failed", str(e))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _send_8b_number(self, value: int, log: bool = True):
+        """
+        Send exactly 8 bytes, digits-only, custom format:
+        120 -> "01200000"
+        5   -> "00500000"
+        100 -> "01000000"
+        Rule: take the number as 3 digits (zero-filled), prefix '0', then pad right with zeros to 8.
+        """
+        if not self.connected or not self.ser:
+            return
+
+        try:
+            v = int(value)
+        except Exception:
+            v = 0
+
+        # keep it sane; this encoding only preserves the first 3 digits anyway
+        v = max(0, min(999, v))
+
+        s3 = str(v).zfill(3)           # 120 -> "120", 5 -> "005"
+        frame = ("0" + s3 + "0000")[:8]  # -> "01200000"
+        payload = frame.encode("ascii")  # exactly 8 bytes
+
+        def worker():
+            with self.sending_lock:
+                try:
+                    self.ser.write(payload)
+                    if log:
+                        self.append_log(f"Sent 8B num: {frame}")
+                except Exception as e:
+                    messagebox.showerror("Send Failed", str(e))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _send_cmd_char(self, ch: str):
+        """
+        For 1-char commands (dpad, +/-, digits), send as head+7 zeros.
+        """
         if not ch or len(ch) != 1:
             return
 
@@ -424,29 +472,7 @@ class TelemetryUI:
             self.last_dpad_cmd = ch
             self.last_cmd_time = now
 
-        def worker():
-            with self.sending_lock:
-                self.send_one_byte(ch, log=True)
-
-        threading.Thread(target=worker, daemon=True).start()
-
-    def _send_cmd_text(self, text: str):
-        """
-        Send multi-byte ASCII commands like A120 / X100 / Y200.
-        Does nothing if not connected (consistent behavior).
-        """
-        if not self.connected or not self.ser:
-            return
-        if not text:
-            return
-
-        payload = text.encode("utf-8")
-
-        def worker():
-            with self.sending_lock:
-                self.send_bytes(payload, log_msg=f"Sent cmd: {text}")
-
-        threading.Thread(target=worker, daemon=True).start()
+        self._send_8b_head(ch, 0, log=True)
 
     # ---------------- Amplitude helpers ----------------
     def _set_amp_target(self, amp: int):
@@ -455,18 +481,16 @@ class TelemetryUI:
         self.amp_var.set(str(self.amp_target))
 
     def _amp_plus(self):
-        # Update display regardless of connection (matches PyBluez UI feel)
         self._set_amp_target(self.amp_target + self.amp_step)
-        # Send only if connected
-        self._send_cmd_char('+')
+        self._send_cmd_char('+')  # +0000000
 
     def _amp_minus(self):
         self._set_amp_target(self.amp_target - self.amp_step)
-        self._send_cmd_char('-')
+        self._send_cmd_char('-')  # -0000000
 
     def _amp_digit(self, d: int):
         self._set_amp_target(d * 5)
-        self._send_cmd_char(str(d))
+        self._send_cmd_char(str(d))  # '7' -> 70000000
 
     # ---------------- Key handling ----------------
     def on_key(self, event: tk.Event):
@@ -515,7 +539,7 @@ class TelemetryUI:
 
         self.root.after(50, self._poll_queue)
 
-    # ---------------- Mode panel logic (NEW) ----------------
+    # ---------------- Mode panel logic ----------------
     def _on_mode_change(self):
         mode = self.control_mode_var.get()
         auto = (mode == "auto")
@@ -529,14 +553,21 @@ class TelemetryUI:
         self.rb_angle.config(state=state_auto)
         self.rb_coords.config(state=state_auto)
 
-        # Enable/disable submode boxes based on auto + selected submode
+        # Send mode marker (8B head+zeros)
+        if not auto:
+            self._send_8b_head("M", 0)  # manual
+        else:
+            if self.auto_submode_var.get() == "angle":
+                self._send_8b_head("D", 0)  # direction/angle
+            else:
+                self._send_8b_head("P", 0)  # position/coords
+
         self._on_auto_submode_change()
 
     def _on_auto_submode_change(self):
         auto = (self.control_mode_var.get() == "auto")
         sub = self.auto_submode_var.get()
 
-        # Helper to set state on a list of widgets
         def set_widgets(widgets, st):
             for w in widgets:
                 try:
@@ -544,62 +575,58 @@ class TelemetryUI:
                 except tk.TclError:
                     pass
 
-        # All auto controls disabled if not in auto
         if not auto:
             set_widgets([self.angle_entry, self.btn_send_angle], "disabled")
             set_widgets([self.xcmd_entry, self.btn_send_x, self.ycmd_entry, self.btn_send_y, self.btn_send_xy], "disabled")
             return
 
-        # In auto: enable based on submode
+        # switching submode while in auto also sends the corresponding marker
         if sub == "angle":
+            self._send_8b_head("D", 0)
             set_widgets([self.angle_entry, self.btn_send_angle], "normal")
             set_widgets([self.xcmd_entry, self.btn_send_x, self.ycmd_entry, self.btn_send_y, self.btn_send_xy], "disabled")
         else:
+            self._send_8b_head("P", 0)
             set_widgets([self.angle_entry, self.btn_send_angle], "disabled")
             set_widgets([self.xcmd_entry, self.btn_send_x, self.ycmd_entry, self.btn_send_y, self.btn_send_xy], "normal")
 
     def _send_angle(self):
         if self.control_mode_var.get() != "auto" or self.auto_submode_var.get() != "angle":
             return
-        s = self.angle_var.get().strip()
         try:
-            ang = int(s)
+            ang = int(self.angle_var.get().strip())
         except ValueError:
             messagebox.showerror("Invalid angle", "Angle must be an integer (e.g., 120).")
             return
-        # Keep it simple; clamp to [0, 359]
         ang = max(0, min(359, ang))
         self.angle_var.set(str(ang))
-        self._send_cmd_text(f"A{ang}")
+        # Send digits only (8 bytes)
+        self._send_8b_number(ang)
 
     def _send_x(self):
         if self.control_mode_var.get() != "auto" or self.auto_submode_var.get() != "coords":
             return
-        s = self.xcmd_var.get().strip()
         try:
-            x = int(s)
+            x = int(self.xcmd_var.get().strip())
         except ValueError:
             messagebox.showerror("Invalid X", "X must be an integer (e.g., 100).")
             return
         self.xcmd_var.set(str(x))
-        self._send_cmd_text(f"X{x}")
+        self._send_8b_number(x)
 
     def _send_y(self):
         if self.control_mode_var.get() != "auto" or self.auto_submode_var.get() != "coords":
             return
-        s = self.ycmd_var.get().strip()
         try:
-            y = int(s)
+            y = int(self.ycmd_var.get().strip())
         except ValueError:
             messagebox.showerror("Invalid Y", "Y must be an integer (e.g., 200).")
             return
         self.ycmd_var.set(str(y))
-        self._send_cmd_text(f"Y{y}")
+        self._send_8b_number(y)
 
     def _send_xy(self):
-        # Send X then Y (two commands)
         self._send_x()
-        # small spacing can help on some parsers, but keep it minimal and safe
         time.sleep(0.02)
         self._send_y()
 
@@ -630,16 +657,12 @@ class TelemetryUI:
              (self.cx - arrow_r_inner, self.cy - w),
              (self.cx - arrow_r_inner, self.cy + w)], "arrow_left")
 
-        # Clicking arrows moves knob regardless; sends only if connected AND manual
         self.canvas.tag_bind("arrow_up", "<Button-1>", lambda e: self._arrow_click("up"))
         self.canvas.tag_bind("arrow_right", "<Button-1>", lambda e: self._arrow_click("right"))
         self.canvas.tag_bind("arrow_down", "<Button-1>", lambda e: self._arrow_click("down"))
         self.canvas.tag_bind("arrow_left", "<Button-1>", lambda e: self._arrow_click("left"))
 
     def _apply_dpad_visual_state(self):
-        """
-        Grey out D-pad in automatic mode; restore in manual mode.
-        """
         if self.dpad_enabled:
             self.canvas.itemconfig(self.base_circle, outline="#999", width=3)
             for aid in self.arrow_ids:
@@ -653,7 +676,6 @@ class TelemetryUI:
             self.canvas.itemconfig(self.knob, fill="#f0f0f0", outline="#bdbdbd", width=2)
 
     def _arrow_click(self, direction: str):
-        # In auto mode, ignore all D-pad interactions
         if not self.dpad_enabled:
             return
 
@@ -742,6 +764,7 @@ class TelemetryUI:
         if abs(dx) > abs(dy):
             cmd = 'l' if dx < 0 else 'r'
         else:
+            # UI coords: dy < 0 is UP
             cmd = 's' if dy < 0 else 'c'
 
         self._send_cmd_char(cmd)
