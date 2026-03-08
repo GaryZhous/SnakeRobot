@@ -268,7 +268,7 @@ class TelemetryUI:
 
         # ===== D-pad =====
         dpad_frame = ttk.LabelFrame(root, text="D-pad (movement control) — sends 8B frames (l/r/s/c)")
-        dpad_frame.pack(fill="x", padx=10, pady=10)
+        dpad_frame.pack(fill="both", expand=True, padx=10, pady=10)
 
         ttk.Label(
             dpad_frame,
@@ -277,7 +277,8 @@ class TelemetryUI:
         ).pack(anchor="w", padx=10, pady=(6, 0))
 
         self.canvas = tk.Canvas(dpad_frame, width=320, height=320, highlightthickness=0)
-        self.canvas.pack(padx=10, pady=10)
+        self.canvas.pack(fill="both", expand=True, padx=10, pady=10)
+        self.canvas.bind("<Configure>", self._on_canvas_resize)
 
         # Geometry
         self.cx, self.cy = 160, 160
@@ -675,6 +676,37 @@ class TelemetryUI:
                 self.canvas.itemconfig(aid, fill="#efefef", outline="#bdbdbd", width=2)
             self.canvas.itemconfig(self.knob, fill="#f0f0f0", outline="#bdbdbd", width=2)
 
+    def _on_canvas_resize(self, event):
+        w, h = event.width, event.height
+        if w < 10 or h < 10:
+            return
+        margin = 20
+        min_base_r = 25  # ensure base radius stays large enough for valid knob motion
+        min_dim = min(w, h)
+        available_base_r = min_dim // 2 - margin
+        if available_base_r < min_base_r:
+            # Canvas too small to render the D-pad reliably; keep previous layout
+            return
+        self.cx = w // 2
+        self.cy = h // 2
+        self.base_r = available_base_r
+        self.knob_r = max(15, self.base_r // 6)
+        self.deadzone_px = max(15, self.base_r // 5)
+
+        self.canvas.coords(
+            self.base_circle,
+            self.cx - self.base_r, self.cy - self.base_r,
+            self.cx + self.base_r, self.cy + self.base_r,
+        )
+
+        for aid in self.arrow_ids:
+            self.canvas.delete(aid)
+        self.arrow_ids = []
+        self._draw_arrows()
+
+        self._set_knob_center()
+        self._apply_dpad_visual_state()
+
     def _arrow_click(self, direction: str):
         if not self.dpad_enabled:
             return
@@ -777,6 +809,8 @@ class TelemetryUI:
 
 def main():
     root = tk.Tk()
+    root.resizable(True, True)
+    root.minsize(600, 500)
     try:
         ttk.Style().theme_use("clam")
     except Exception:
