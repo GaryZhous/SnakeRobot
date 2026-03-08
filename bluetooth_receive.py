@@ -215,8 +215,6 @@ class TelemetryUI:
 
 def main():
     root = tk.Tk()
-    root.resizable(True, True)
-    root.minsize(300, 200)
     # Nice default theme on Windows
     try:
         ttk.Style().theme_use("clam")
