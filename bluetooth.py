@@ -680,10 +680,16 @@ class TelemetryUI:
         w, h = event.width, event.height
         if w < 10 or h < 10:
             return
+        margin = 20
+        min_base_r = 25  # ensure base radius stays large enough for valid knob motion
+        min_dim = min(w, h)
+        available_base_r = min_dim // 2 - margin
+        if available_base_r < min_base_r:
+            # Canvas too small to render the D-pad reliably; keep previous layout
+            return
         self.cx = w // 2
         self.cy = h // 2
-        margin = 20
-        self.base_r = min(w, h) // 2 - margin
+        self.base_r = available_base_r
         self.knob_r = max(15, self.base_r // 6)
         self.deadzone_px = max(15, self.base_r // 5)
 
