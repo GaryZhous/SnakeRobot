@@ -118,7 +118,7 @@ The GUI sends single-character (or 8-byte padded) commands over the Bluetooth SP
 
 Two GUI scripts are included:
 
-### `bluetooth_receive.py` — Simple Telemetry Viewer
+### `bluetooth_receive.py` — Simple Telemetry Viewer (For testing only)
 - Connects to the ESP32 over a serial COM port.
 - Displays live **direction (°)**, **X position (m)**, and **Y position (m)** from the ESP32 telemetry stream.
 - Lets you type and send a command character to the robot.
