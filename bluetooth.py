@@ -485,9 +485,9 @@ class TelemetryUI:
     def _send_manual_angle(self, angle_deg: float, force: bool = False):
         """
         Manual analog steering angle: -90..90 deg.
-        Sent as 8-byte numeric payload using 0..180 offset encoding:
-          tx_value = angle_deg + 90
-        Example: -90 -> 0, 0 -> 90, 90 -> 180
+                Sent as 8-byte numeric payload using reversed 0..180 encoding:
+                    tx_value = 90 - angle_deg
+                Example: -90 -> 180, 0 -> 90, 90 -> 0
         """
         angle = int(round(max(-90, min(90, angle_deg))))
         self.manual_angle_var.set(str(angle))
@@ -498,7 +498,7 @@ class TelemetryUI:
                 if (now - self.last_manual_angle_time) < self.manual_angle_resend_sec:
                     return
 
-        tx_value = angle + 90
+        tx_value = 90 - angle
         self.last_manual_angle = angle
         self.last_manual_angle_time = now
         self._send_8b_number(tx_value, log=False)
@@ -823,9 +823,11 @@ class TelemetryUI:
             self._send_manual_angle(0)
             return
 
-        # Horizontal axis maps continuously to steering angle -90..90.
-        x_norm = dx / max(1.0, (self.base_r - self.knob_r - 6))
-        angle = max(-90.0, min(90.0, x_norm * 90.0))
+        # Curvature-based mapping: use stick angle on the circular pad arc.
+        # This follows the circle geometry instead of a linear X mapping.
+        radius = max(1.0, math.hypot(dx, dy))
+        x_over_r = max(-1.0, min(1.0, dx / radius))
+        angle = math.degrees(math.asin(x_over_r))
         self._send_manual_angle(angle)
 
     # ---------------- Close ----------------
