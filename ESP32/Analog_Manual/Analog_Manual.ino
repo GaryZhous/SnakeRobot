@@ -88,31 +88,52 @@ void writeFloatLE(BluetoothSerial& bt, float v) {
 // =====================================================
 // Command Logic
 // =====================================================
-void processManualCommand(char c) {
+// void processManualCommand(char c) {
+//     c = tolower(c);
+//     if (c == 'c') {
+//         targetTurnOffsetDeg = 0.0f;
+//         currentTurnOffsetDeg = 0.0f;
+//         calibrateToCenter();
+//         motionEnabled = false;
+//         //Serial.println(">> Manual: CENTER & STOP");
+//     } else if (c == 'l') {
+//         targetTurnOffsetDeg = 15.0f;
+//         //Serial.println(">> Manual: TURN LEFT");
+//     } else if (c == 'r') {
+//         targetTurnOffsetDeg = -15.0f;
+//         //Serial.println(">> Manual: TURN RIGHT");
+//     } else if (c == 's') {
+//         targetTurnOffsetDeg = 0.0f;
+//         motionEnabled = true;
+//         //Serial.println(">> Manual: START MOTION");
+//     } else if (c == '+') {
+//         targetAmplitudeDeg = clampf(targetAmplitudeDeg + 5.0f, 0.0f, 60.0f);
+//     } else if (c == '-') {
+//         targetAmplitudeDeg = clampf(targetAmplitudeDeg - 5.0f, 0.0f, 60.0f);
+//     }
+// }
+
+void processManualCommand(char c, uint8_t packet[8]) {
     c = tolower(c);
-    if (c == 'c') {
-        targetTurnOffsetDeg = 0.0f;
-        currentTurnOffsetDeg = 0.0f;
-        calibrateToCenter();
-        motionEnabled = false;
-        Serial.println(">> Manual: CENTER & STOP");
-    } else if (c == 'l') {
-        targetTurnOffsetDeg = 15.0f;
-        Serial.println(">> Manual: TURN LEFT");
-    } else if (c == 'r') {
-        targetTurnOffsetDeg = -15.0f;
-        Serial.println(">> Manual: TURN RIGHT");
-    } else if (c == 's') {
-        targetTurnOffsetDeg = 0.0f;
-        motionEnabled = true;
-        Serial.println(">> Manual: START MOTION");
-    } else if (c >= '0' && c <= '9') {
-        targetAmplitudeDeg = clampf((c - '0') * 5.0f, 0.0f, 60.0f);
-        Serial.printf(">> Manual: SET AMP TO %.1f\n", targetAmplitudeDeg);
-    } else if (c == '+') {
+    if (c == '+') {
         targetAmplitudeDeg = clampf(targetAmplitudeDeg + 5.0f, 0.0f, 60.0f);
     } else if (c == '-') {
         targetAmplitudeDeg = clampf(targetAmplitudeDeg - 5.0f, 0.0f, 60.0f);
+    } else if (c != 'D' && c != 'P' && c != 'M'){
+
+        int manual_angle = 0;
+
+        manual_angle += (packet[1] - '0') * 100;
+        manual_angle += (packet[2] - '0') * 10;
+        manual_angle += (packet[3] - '0');
+
+        manual_angle -= 90;
+
+        targetTurnOffsetDeg = (float) manual_angle;
+
+        Serial.println("angle received:");
+        Serial.println(manual_angle);
+        Serial.println();
     }
 }
 
@@ -130,15 +151,15 @@ void handleBluetoothRx() {
         else if (input == 'D') {
             currentMode = MODE_D;
             motionEnabled = true; 
-            Serial.println(">> SYSTEM: MODE -> DIRECTION");
+            //Serial.println(">> SYSTEM: MODE -> DIRECTION");
         }
         else if (input == 'P') {
             currentMode = MODE_P;
-            Serial.println(">> SYSTEM: MODE -> POSITION");
+            //Serial.println(">> SYSTEM: MODE -> POSITION");
         } 
         // 2. If not a Mode switch, and we are in Manual, process as Command
         else if (currentMode == MODE_M) {
-            processManualCommand(input);
+            processManualCommand(input, packet);
         }
         else if (currentMode == MODE_D) {
 
@@ -150,8 +171,8 @@ void handleBluetoothRx() {
 
             autoTargetYaw = targetDirection;
 
-            Serial.print("Target Angle:");
-            Serial.println(autoTargetYaw);
+            //Serial.print("Target Angle:");
+            //Serial.println(autoTargetYaw);
 
         }
     }
@@ -225,7 +246,7 @@ void setup() {
         servos[i].setPeriodHertz(50);
         servos[i].attach(kServoPins[i], 500, 2400);
     }
-    calibrateToCenter();
+    //calibrateToCenter();
     startTimeMs = millis(); lastLoopMs = startTimeMs;
     Serial.println("System Ready.");
 }
