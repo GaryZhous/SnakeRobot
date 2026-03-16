@@ -21,8 +21,8 @@
 #define FLOW_CS       5
 #define FLOW_RST      21
 
-static const int kNumServos = 5;
-static const int kServoPins[kNumServos] = {13, 12, 14, 27, 26};
+static const int kNumServos = 8;
+static const int kServoPins[kNumServos] = {13, 12, 14, 27, 26, 25, 33, 32};
 static const float meters_per_count = 1.0f / 108.0f;
 
 // --- Control Modes & Gains ---

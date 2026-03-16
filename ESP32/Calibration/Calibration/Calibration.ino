@@ -2,10 +2,8 @@
 #include <math.h>
 
 // config
-// const int numServos = 8;
-// const int servoPins[numServos] =  {13, 12, 14, 27, 26, 25, 33, 32};
-const int numServos = 1;
-const int servoPins[numServos] =  {26};
+const int numServos = 8;
+const int servoPins[numServos] =  {13, 12, 14, 27, 26, 25, 33, 32};
 
 // params
 float amplitude = 45.0;                  // swing size in degrees
@@ -42,14 +40,4 @@ void setup() {
 }
 
 void loop() {
-  float t = (millis() - startTime) / 1000.0f;
-  float omega = TWO_PI * frequency;
-
-  for (int i = 0; i < numServos; i++) {
-    float phase = i * phaseShift;
-    float angle = center + amplitude * sinf(omega * t + phase);
-    servos[i].write(adjustAngle(angle));
-  }
-
-  delay(updateDelay);
 }

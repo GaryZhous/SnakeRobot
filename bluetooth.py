@@ -7,7 +7,7 @@ import serial
 import tkinter as tk
 from tkinter import ttk, messagebox
 
-PORT = "COM11"      
+PORT = "COM11"      # <-- your Bluetooth SPP COM port
 BAUD = 115200       # SPP often ignores baud, but keep consistent
 READ_TIMEOUT = 0.2  # seconds
 
@@ -82,12 +82,6 @@ class TelemetryUI:
         self.last_dpad_cmd = None
         self.last_cmd_time = 0.0
         self.hold_resend_sec = 0.15
-
-        # Manual analog steering send throttling
-        self.last_manual_angle = None
-        self.last_manual_angle_time = 0.0
-        self.manual_angle_resend_sec = 0.08
-        self.manual_angle_step_deg = 2
 
         # Amp display (PC-side notion)
         self.amp_min = 0
@@ -273,15 +267,14 @@ class TelemetryUI:
         ).pack(anchor="w", padx=10, pady=(10, 10))
 
         # ===== D-pad =====
-        dpad_frame = ttk.LabelFrame(root, text="D-pad (manual analog steering) — angle -90..90")
+        dpad_frame = ttk.LabelFrame(root, text="D-pad (movement control) — sends 8B frames (l/r/s/c)")
         dpad_frame.pack(fill="both", expand=True, padx=10, pady=10)
 
-        dpad_info = ttk.Frame(dpad_frame)
-        dpad_info.pack(fill="x", padx=10, pady=(6, 0))
-
-        ttk.Label(dpad_info, text="Manual angle (deg):").pack(side="left")
-        self.manual_angle_var = tk.StringVar(value="0")
-        ttk.Label(dpad_info, textvariable=self.manual_angle_var, width=6).pack(side="left", padx=(6, 0))
+        ttk.Label(
+            dpad_frame,
+            text=(),
+            justify="left",
+        ).pack(anchor="w", padx=10, pady=(6, 0))
 
         self.canvas = tk.Canvas(dpad_frame, width=320, height=320, highlightthickness=0)
         self.canvas.pack(fill="both", expand=True, padx=10, pady=10)
@@ -481,27 +474,6 @@ class TelemetryUI:
             self.last_cmd_time = now
 
         self._send_8b_head(ch, 0, log=True)
-
-    def _send_manual_angle(self, angle_deg: float, force: bool = False):
-        """
-        Manual analog steering angle: -90..90 deg.
-                Sent as 8-byte numeric payload using reversed 0..180 encoding:
-                    tx_value = 90 - angle_deg
-                Example: -90 -> 180, 0 -> 90, 90 -> 0
-        """
-        angle = int(round(max(-90, min(90, angle_deg))))
-        self.manual_angle_var.set(str(angle))
-
-        now = time.time()
-        if not force and self.last_manual_angle is not None:
-            if abs(angle - self.last_manual_angle) < self.manual_angle_step_deg:
-                if (now - self.last_manual_angle_time) < self.manual_angle_resend_sec:
-                    return
-
-        tx_value = 90 - angle
-        self.last_manual_angle = angle
-        self.last_manual_angle_time = now
-        self._send_8b_number(tx_value, log=False)
 
     # ---------------- Amplitude helpers ----------------
     def _set_amp_target(self, amp: int):
@@ -741,16 +713,16 @@ class TelemetryUI:
 
         if direction == "left":
             self._set_knob_from_normalized(-1.0, 0.0)
-            self._send_manual_angle(-90, force=True)
+            self._send_cmd_char('l')
         elif direction == "right":
             self._set_knob_from_normalized(1.0, 0.0)
-            self._send_manual_angle(90, force=True)
+            self._send_cmd_char('r')
         elif direction == "up":
             self._set_knob_from_normalized(0.0, 1.0)
-            self._send_manual_angle(0, force=True)
+            self._send_cmd_char('s')
         elif direction == "down":
             self._set_knob_from_normalized(0.0, -1.0)
-            self._send_manual_angle(0, force=True)
+            self._send_cmd_char('c')
 
     # ---------------- D-pad interactions ----------------
     def on_canvas_click(self, event):
@@ -776,7 +748,6 @@ class TelemetryUI:
         self.dragging = False
         self._set_knob_center()
         self.last_dpad_cmd = None
-        self._send_manual_angle(0, force=True)
 
     def _set_knob_center(self):
         self.canvas.coords(
@@ -820,15 +791,15 @@ class TelemetryUI:
             return
 
         if math.hypot(dx, dy) < self.deadzone_px:
-            self._send_manual_angle(0)
             return
 
-        # Curvature-based mapping: use stick angle on the circular pad arc.
-        # This follows the circle geometry instead of a linear X mapping.
-        radius = max(1.0, math.hypot(dx, dy))
-        x_over_r = max(-1.0, min(1.0, dx / radius))
-        angle = math.degrees(math.asin(x_over_r))
-        self._send_manual_angle(angle)
+        if abs(dx) > abs(dy):
+            cmd = 'l' if dx < 0 else 'r'
+        else:
+            # UI coords: dy < 0 is UP
+            cmd = 's' if dy < 0 else 'c'
+
+        self._send_cmd_char(cmd)
 
     # ---------------- Close ----------------
     def on_close(self):
