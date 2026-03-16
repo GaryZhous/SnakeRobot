@@ -554,14 +554,6 @@ class TelemetryUI:
         self.rb_coords.config(state=state_auto)
 
         # Send mode marker (8B head+zeros)
-        if not auto:
-            self._send_8b_head("M", 0)  # manual
-        else:
-            if self.auto_submode_var.get() == "angle":
-                self._send_8b_head("D", 0)  # direction/angle
-            else:
-                self._send_8b_head("P", 0)  # position/coords
-
         self._on_auto_submode_change()
 
     def _on_auto_submode_change(self):
