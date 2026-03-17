@@ -58,8 +58,8 @@ The ESP32 also streams back telemetry (heading, X position, Y position) as packe
 | 4 | 27 |
 | 5 | 26 |
 | 6 | 25 |
-| 7 | 32 |
-| 8 | 2  |
+| 7 | 33 |
+| 8 | 32 |
 
 > **Tip:** Power the servos from a dedicated 5 V rail, **not** directly from the ESP32's 3.3 V pin. Share a common ground between the servo power supply and the ESP32.
 
