@@ -56,10 +56,9 @@ class TelemetryUI:
          - Direction: "D0000000"  (auto angle)
          - Position:  "P0000000"  (auto coords)
 
-      2) Auto payload values (NO leading letter anymore):
-         - Angle value: "00000120"   (8 digits)
-         - X value:     "00000100"
-         - Y value:     "00000200"
+        2) Auto payload values (NO leading letter anymore):
+            - Angle value: "01200000"   (8 digits, custom angle format)
+            - XY value:    "+100+200"   (8 chars, signed 3-digit X + signed 3-digit Y)
 
       3) D-pad and amp commands remain 1-char header + 7 zeros:
          - 'l','r','s','c','+','-','0'..'9' -> e.g. "l0000000", "+0000000", "70000000"
@@ -227,8 +226,8 @@ class TelemetryUI:
         angle_in = ttk.Frame(self.angle_box)
         angle_in.pack(fill="x")
 
-        ttk.Label(angle_in, text="Angle (deg):").pack(side="left")
-        self.angle_var = tk.StringVar(value="120")
+        ttk.Label(angle_in, text="Angle (deg, -180..180):").pack(side="left")
+        self.angle_var = tk.StringVar(value="0")
         self.angle_entry = ttk.Entry(angle_in, textvariable=self.angle_var, width=10)
         self.angle_entry.pack(side="left", padx=8)
 
@@ -237,10 +236,10 @@ class TelemetryUI:
 
         ttk.Label(
             self.angle_box,
-            text="Sends: 8 digits only (example: 00000120). Mode marker already sent: D0000000",
+            text="Input range: -180..180. Sent as wrapped 0..359 in 8-digit format (e.g., -90 -> 270).",
         ).pack(anchor="w", pady=(6, 0))
 
-        # Coords controls (now sends ONLY 8-digit value per X/Y)
+        # Coords controls (send X and Y together in one 8-byte frame: ±xxx±yyy)
         self.coords_box = ttk.Frame(mode_frame)
         self.coords_box.pack(fill="x", padx=10, pady=(10, 0))
 
@@ -251,7 +250,7 @@ class TelemetryUI:
         self.xcmd_var = tk.StringVar(value="100")
         self.xcmd_entry = ttk.Entry(coords_in1, textvariable=self.xcmd_var, width=10)
         self.xcmd_entry.pack(side="left", padx=8)
-        self.btn_send_x = ttk.Button(coords_in1, text="Send 8-digit X", command=self._send_x)
+        self.btn_send_x = ttk.Button(coords_in1, text="Send XY frame (from X+Y)", command=self._send_x)
         self.btn_send_x.pack(side="left")
 
         coords_in2 = ttk.Frame(self.coords_box)
@@ -261,19 +260,19 @@ class TelemetryUI:
         self.ycmd_var = tk.StringVar(value="200")
         self.ycmd_entry = ttk.Entry(coords_in2, textvariable=self.ycmd_var, width=10)
         self.ycmd_entry.pack(side="left", padx=8)
-        self.btn_send_y = ttk.Button(coords_in2, text="Send 8-digit Y", command=self._send_y)
+        self.btn_send_y = ttk.Button(coords_in2, text="Send XY frame (from X+Y)", command=self._send_y)
         self.btn_send_y.pack(side="left")
 
-        self.btn_send_xy = ttk.Button(self.coords_box, text="Send X then Y", command=self._send_xy)
+        self.btn_send_xy = ttk.Button(self.coords_box, text="Send XY (8-byte signed)", command=self._send_xy)
         self.btn_send_xy.pack(anchor="w", pady=(8, 0))
 
         ttk.Label(
             mode_frame,
-            text="Sends: 8 digits only (examples: 00000100, 00000200). Mode marker already sent: P0000000",
+            text="Sends one 8-byte XY frame: ±xxx±yyy (example: +100+200). Mode marker already sent: P0000000",
         ).pack(anchor="w", padx=10, pady=(10, 10))
 
         # ===== D-pad =====
-        dpad_frame = ttk.LabelFrame(root, text="D-pad (manual analog steering) — angle -90..90")
+        dpad_frame = ttk.LabelFrame(root, text="D-pad (manual analog steering) — angle -15..15")
         dpad_frame.pack(fill="both", expand=True, padx=10, pady=10)
 
         dpad_info = ttk.Frame(dpad_frame)
@@ -465,6 +464,45 @@ class TelemetryUI:
 
         threading.Thread(target=worker, daemon=True).start()
 
+    def _send_8b_xy_signed(self, x: int, y: int, log: bool = True):
+        """
+        Send exactly 8 bytes for XY coordinates in signed 3-digit format:
+          ±x1x2x3±y1y2y3
+        Examples:
+          x=100, y=200  -> "+100+200"
+          x=-5,  y=42   -> "-005+042"
+        """
+        if not self.connected or not self.ser:
+            return
+
+        try:
+            xv = int(x)
+        except Exception:
+            xv = 0
+        try:
+            yv = int(y)
+        except Exception:
+            yv = 0
+
+        xv = max(-999, min(999, xv))
+        yv = max(-999, min(999, yv))
+
+        sx = "+" if xv >= 0 else "-"
+        sy = "+" if yv >= 0 else "-"
+        frame = f"{sx}{abs(xv):03d}{sy}{abs(yv):03d}"
+        payload = frame.encode("ascii")  # exactly 8 bytes
+
+        def worker():
+            with self.sending_lock:
+                try:
+                    self.ser.write(payload)
+                    if log:
+                        self.append_log(f"Sent 8B XY: {frame}")
+                except Exception as e:
+                    messagebox.showerror("Send Failed", str(e))
+
+        threading.Thread(target=worker, daemon=True).start()
+
     def _send_cmd_char(self, ch: str):
         """
         For 1-char commands (dpad, +/-, digits), send as head+7 zeros.
@@ -484,12 +522,12 @@ class TelemetryUI:
 
     def _send_manual_angle(self, angle_deg: float, force: bool = False):
         """
-        Manual analog steering angle: -90..90 deg.
+        Manual analog steering angle: -15..15 deg.
                 Sent as 8-byte numeric payload using reversed 0..180 encoding:
                     tx_value = 90 - angle_deg
-                Example: -90 -> 180, 0 -> 90, 90 -> 0
+            Example: -15 -> 105, 0 -> 90, 15 -> 75
         """
-        angle = int(round(max(-90, min(90, angle_deg))))
+        angle = int(round(max(-15, min(15, angle_deg))))
         self.manual_angle_var.set(str(angle))
 
         now = time.time()
@@ -625,12 +663,14 @@ class TelemetryUI:
         try:
             ang = int(self.angle_var.get().strip())
         except ValueError:
-            messagebox.showerror("Invalid angle", "Angle must be an integer (e.g., 120).")
+            messagebox.showerror("Invalid angle", "Angle must be an integer in range -180..180 (e.g., -90).")
             return
-        ang = max(0, min(359, ang))
+
+        ang = max(-180, min(180, ang))
         self.angle_var.set(str(ang))
-        # Send digits only (8 bytes)
-        self._send_8b_number(ang)
+        # Keep TX protocol as unsigned 0..359 while allowing signed UI input.
+        tx_ang = (ang + 360) % 360
+        self._send_8b_number(tx_ang)
 
     def _send_x(self):
         if self.control_mode_var.get() != "auto" or self.auto_submode_var.get() != "coords":
@@ -640,24 +680,57 @@ class TelemetryUI:
         except ValueError:
             messagebox.showerror("Invalid X", "X must be an integer (e.g., 100).")
             return
+        try:
+            y = int(self.ycmd_var.get().strip())
+        except ValueError:
+            messagebox.showerror("Invalid Y", "Y must be an integer (e.g., 200).")
+            return
+
+        x = max(-999, min(999, x))
+        y = max(-999, min(999, y))
         self.xcmd_var.set(str(x))
-        self._send_8b_number(x)
+        self.ycmd_var.set(str(y))
+        self._send_8b_xy_signed(x, y)
 
     def _send_y(self):
         if self.control_mode_var.get() != "auto" or self.auto_submode_var.get() != "coords":
+            return
+        try:
+            x = int(self.xcmd_var.get().strip())
+        except ValueError:
+            messagebox.showerror("Invalid X", "X must be an integer (e.g., 100).")
             return
         try:
             y = int(self.ycmd_var.get().strip())
         except ValueError:
             messagebox.showerror("Invalid Y", "Y must be an integer (e.g., 200).")
             return
+
+        x = max(-999, min(999, x))
+        y = max(-999, min(999, y))
+        self.xcmd_var.set(str(x))
         self.ycmd_var.set(str(y))
-        self._send_8b_number(y)
+        self._send_8b_xy_signed(x, y)
 
     def _send_xy(self):
-        self._send_x()
-        time.sleep(0.02)
-        self._send_y()
+        if self.control_mode_var.get() != "auto" or self.auto_submode_var.get() != "coords":
+            return
+        try:
+            x = int(self.xcmd_var.get().strip())
+        except ValueError:
+            messagebox.showerror("Invalid X", "X must be an integer (e.g., 100).")
+            return
+        try:
+            y = int(self.ycmd_var.get().strip())
+        except ValueError:
+            messagebox.showerror("Invalid Y", "Y must be an integer (e.g., 200).")
+            return
+
+        x = max(-999, min(999, x))
+        y = max(-999, min(999, y))
+        self.xcmd_var.set(str(x))
+        self.ycmd_var.set(str(y))
+        self._send_8b_xy_signed(x, y)
 
     # ---------------- D-pad drawing ----------------
     def _draw_arrows(self):
@@ -741,16 +814,17 @@ class TelemetryUI:
 
         if direction == "left":
             self._set_knob_from_normalized(-1.0, 0.0)
-            self._send_manual_angle(-90, force=True)
+            self._send_manual_angle(-15, force=True)
         elif direction == "right":
             self._set_knob_from_normalized(1.0, 0.0)
-            self._send_manual_angle(90, force=True)
+            self._send_manual_angle(15, force=True)
         elif direction == "up":
             self._set_knob_from_normalized(0.0, 1.0)
             self._send_manual_angle(0, force=True)
         elif direction == "down":
             self._set_knob_from_normalized(0.0, -1.0)
-            self._send_manual_angle(0, force=True)
+            self.manual_angle_var.set("C")
+            self._send_cmd_char("c")
 
     # ---------------- D-pad interactions ----------------
     def on_canvas_click(self, event):
@@ -775,8 +849,10 @@ class TelemetryUI:
             return
         self.dragging = False
         self._set_knob_center()
+        was_c = (self.last_dpad_cmd == "c")
         self.last_dpad_cmd = None
-        self._send_manual_angle(0, force=True)
+        if not was_c:
+            self._send_manual_angle(0, force=True)
 
     def _set_knob_center(self):
         self.canvas.coords(
@@ -823,11 +899,18 @@ class TelemetryUI:
             self._send_manual_angle(0)
             return
 
-        # Curvature-based mapping: use stick angle on the circular pad arc.
-        # This follows the circle geometry instead of a linear X mapping.
+        # Bottom half of pad is command-only: send constant 'c'.
+        # In Tk coordinates, positive dy means below center.
+        if dy > 0:
+            self.manual_angle_var.set("C")
+            self._send_cmd_char("c")
+            return
+
+        # Curvature-based mapping: use stick angle on the circular pad arc,
+        # scaled to a tighter steering range of -15..15.
         radius = max(1.0, math.hypot(dx, dy))
         x_over_r = max(-1.0, min(1.0, dx / radius))
-        angle = math.degrees(math.asin(x_over_r))
+        angle = math.degrees(math.asin(x_over_r)) / 6.0
         self._send_manual_angle(angle)
 
     # ---------------- Close ----------------
