@@ -814,10 +814,10 @@ class TelemetryUI:
 
         if direction == "left":
             self._set_knob_from_normalized(-1.0, 0.0)
-            self._send_manual_angle(-15, force=True)
+            self._send_manual_angle(15, force=True)
         elif direction == "right":
             self._set_knob_from_normalized(1.0, 0.0)
-            self._send_manual_angle(15, force=True)
+            self._send_manual_angle(-15, force=True)
         elif direction == "up":
             self._set_knob_from_normalized(0.0, 1.0)
             self._send_manual_angle(0, force=True)
@@ -910,7 +910,7 @@ class TelemetryUI:
         # scaled to a tighter steering range of -15..15.
         radius = max(1.0, math.hypot(dx, dy))
         x_over_r = max(-1.0, min(1.0, dx / radius))
-        angle = math.degrees(math.asin(x_over_r)) / 6.0
+        angle = -math.degrees(math.asin(x_over_r)) / 6.0
         self._send_manual_angle(angle)
 
     # ---------------- Close ----------------
