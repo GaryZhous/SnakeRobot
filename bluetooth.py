@@ -57,7 +57,7 @@ class TelemetryUI:
          - Position:  "P0000000"  (auto coords)
 
         2) Auto payload values (NO leading letter anymore):
-            - Angle value: "01200000"   (8 digits, custom angle format)
+            - Angle value: "+1200000" / "-0900000" (signed angle, 8 chars)
             - XY value:    "+100+200"   (8 chars, signed 3-digit X + signed 3-digit Y)
 
       3) D-pad and amp commands remain 1-char header + 7 zeros:
@@ -236,7 +236,7 @@ class TelemetryUI:
 
         ttk.Label(
             self.angle_box,
-            text="Input range: -180..180. Sent as wrapped 0..359 in 8-digit format (e.g., -90 -> 270).",
+            text="Input range: -180..180. Sent directly as signed 8-byte value (e.g., -90 -> -0900000).",
         ).pack(anchor="w", pady=(6, 0))
 
         # Coords controls (send X and Y together in one 8-byte frame: ±xxx±yyy)
@@ -464,6 +464,39 @@ class TelemetryUI:
 
         threading.Thread(target=worker, daemon=True).start()
 
+    def _send_8b_signed_number(self, value: int, log: bool = True):
+        """
+        Send exactly 8 bytes for a signed value in fixed-width form:
+          ±v1v2v3 + 4 trailing zeros
+        Examples:
+          120  -> "+1200000"
+          -90  -> "-0900000"
+          0    -> "+0000000"
+        """
+        if not self.connected or not self.ser:
+            return
+
+        try:
+            v = int(value)
+        except Exception:
+            v = 0
+
+        v = max(-999, min(999, v))
+        sign = "+" if v >= 0 else "-"
+        frame = f"{sign}{abs(v):03d}0000"
+        payload = frame.encode("ascii")
+
+        def worker():
+            with self.sending_lock:
+                try:
+                    self.ser.write(payload)
+                    if log:
+                        self.append_log(f"Sent 8B signed num: {frame}")
+                except Exception as e:
+                    messagebox.showerror("Send Failed", str(e))
+
+        threading.Thread(target=worker, daemon=True).start()
+
     def _send_8b_xy_signed(self, x: int, y: int, log: bool = True):
         """
         Send exactly 8 bytes for XY coordinates in signed 3-digit format:
@@ -523,9 +556,9 @@ class TelemetryUI:
     def _send_manual_angle(self, angle_deg: float, force: bool = False):
         """
         Manual analog steering angle: -15..15 deg.
-                Sent as 8-byte numeric payload using reversed 0..180 encoding:
-                    tx_value = 90 - angle_deg
-            Example: -15 -> 105, 0 -> 90, 15 -> 75
+                Sent as 8-byte numeric payload using reversed encoding:
+                    tx_value = 90 + angle_deg
+            Example: -15 -> 75, 0 -> 90, 15 -> 105
         """
         angle = int(round(max(-15, min(15, angle_deg))))
         self.manual_angle_var.set(str(angle))
@@ -536,7 +569,7 @@ class TelemetryUI:
                 if (now - self.last_manual_angle_time) < self.manual_angle_resend_sec:
                     return
 
-        tx_value = 90 - angle
+        tx_value = 90 + angle
         self.last_manual_angle = angle
         self.last_manual_angle_time = now
         self._send_8b_number(tx_value, log=False)
@@ -668,9 +701,7 @@ class TelemetryUI:
 
         ang = max(-180, min(180, ang))
         self.angle_var.set(str(ang))
-        # Keep TX protocol as unsigned 0..359 while allowing signed UI input.
-        tx_ang = (ang + 360) % 360
-        self._send_8b_number(tx_ang)
+        self._send_8b_signed_number(ang)
 
     def _send_x(self):
         if self.control_mode_var.get() != "auto" or self.auto_submode_var.get() != "coords":
