@@ -67,6 +67,17 @@ static float targetY_cm = 0.0f; // Target Y in meters
 
 Servo servos[kNumServos];
 
+//Global declarations for averaged yaw
+const int max_samples = 20;
+const float period = 1000/0.5f; //In ms
+const float sampling_period = 2000/max_samples;
+unsigned long prev_sample_time = 0;
+int sample_idx = 0;
+float yaw_samples [max_samples] = {0};
+float sum_x;
+float sum_y;
+float avg_yaw = 0;
+
 // =====================================================
 // Helpers
 // =====================================================
@@ -92,6 +103,32 @@ void writeFloatLE(BluetoothSerial& bt, float v) {
     uint8_t b[4];
     memcpy(b, &v, 4);
     bt.write(b, 4);
+}
+
+float update_average(float yaw){ //Give it a clamped yaw IN RADIANS
+    unsigned long cur_sample_time = millis();
+    if (cur_sample_time-prev_sample_time>sampling_period){
+        float old_yaw = yaw_samples[sample_idx%max_samples];
+        sum_x -= cos(old_yaw);
+        sum_y -= sin(old_yaw);
+
+
+        yaw_samples[sample_idx%max_samples] = yaw;
+        sum_x+=cos(yaw);
+        sum_y+=sin(yaw);
+
+        avg_yaw = atan2(sum_y, sum_x);
+        sample_idx++;
+        Serial.print("Sample index: ");
+        Serial.println(sample_idx);
+        Serial.print("avg_yaw: ");
+        Serial.println(avg_yaw);
+        Serial.print("SumX: ");
+        Serial.println(sum_x);
+        Serial.print("SumY: ");
+        Serial.println(sum_y);
+    }
+    return avg_yaw;
 }
 
 // =====================================================
@@ -262,13 +299,19 @@ void updateSensorsAndPosition() {
             float qk = sensorValue.un.gameRotationVector.k;
             // Yaw formula
             float yaw = atan2f(2.0f * (qi * qj + qk * qr), 1.0f - 2.0f * (qj * qj + qk * qk));
+            Serial.print("yaw in radian: ");
+            
+            
             lastYawDeg = yaw * (180.0f / PI);
             if (!yawInitialized) { yaw0_deg = lastYawDeg; yawInitialized = true; }
+            update_average(yaw-yaw0_deg*(PI/180.0f));
+            Serial.println(yaw-yaw0_deg*(PI/180.0f));
         }
     }
 
     if (!yawInitialized) return;
     theta_deg = wrapDeg(lastYawDeg - yaw0_deg);
+    avg_yaw = avg_yaw* (180.0f / PI);
     float rad = theta_deg * (PI / 180.0f);
     xw_counts += cosf(rad) * (float)dx - sinf(rad) * (float)dy;
     yw_counts += sinf(rad) * (float)dx + cosf(rad) * (float)dy;
@@ -395,7 +438,8 @@ void loop() {
     if (nowMs - lastTelemetryMs >= kTelemetryPeriodMs) {
         lastTelemetryMs = nowMs;
         if (SerialBT.hasClient() && yawInitialized) {
-            writeFloatLE(SerialBT, theta_deg);
+            // writeFloatLE(SerialBT, theta_deg);
+            writeFloatLE(SerialBT, avg_yaw);
             writeFloatLE(SerialBT, xw_counts * centimeters_per_count);
             writeFloatLE(SerialBT, yw_counts * centimeters_per_count);
         }
