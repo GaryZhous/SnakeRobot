@@ -23,14 +23,14 @@
 
 static const int kNumServos = 8;
 static const int kServoPins[kNumServos] = {13, 12, 14, 27, 26, 25, 33, 32};
-static const float meters_per_count = 1.0f / 108.0f;
+static const float meters_per_count = 1.0f / 120.0f;
 
 // --- Control Modes & Gains ---
 enum ControlMode { MODE_M, MODE_P, MODE_D };
 ControlMode currentMode = MODE_M;
 
 static int autoTargetYaw = 0; 
-static const float Kp_yaw = 0.8f;        
+static const float Kp_yaw = 0.8f;        // TODO: Lower
 static const float kMaxAutoTurn = 25.0f; 
 
 static const char* kBtName = "ESP32_Snake";
