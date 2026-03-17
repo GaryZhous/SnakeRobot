@@ -142,16 +142,20 @@ void handleBluetoothRx() {
         }
         else if (currentMode == MODE_D) {
 
-            int targetDirection = 0;
+            if (packet[1] >= '0' && packet[1] <= '9' &&
+                packet[2] >= '0' && packet[2] <= '9' &&
+                packet[3] >= '0' && packet[3] <= '9') {
+                int targetDirection = 0;
 
-            targetDirection += (packet[1] - '0') * 100;
-            targetDirection += (packet[2] - '0') * 10;
-            targetDirection += (packet[3] - '0');
+                targetDirection += (packet[1] - '0') * 100;
+                targetDirection += (packet[2] - '0') * 10;
+                targetDirection += (packet[3] - '0');
 
-            autoTargetYaw = targetDirection;
+                autoTargetYaw = targetDirection;
 
-            Serial.print("Target Angle:");
-            Serial.println(autoTargetYaw);
+                Serial.print("Target Angle:");
+                Serial.println(autoTargetYaw);
+            }
 
         }
     }
@@ -255,5 +259,5 @@ void loop() {
             writeFloatLE(SerialBT, yw_counts * meters_per_count);
         }
     }
-    delay(20);
+    //delay(20);
 }
