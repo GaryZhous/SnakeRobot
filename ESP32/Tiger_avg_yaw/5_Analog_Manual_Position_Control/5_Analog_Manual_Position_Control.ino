@@ -74,6 +74,8 @@ const float sampling_period = 2000/max_samples;
 unsigned long prev_sample_time = 0;
 int sample_idx = 0;
 float yaw_samples [max_samples] = {0};
+float x_samples [max_samples] = {0};
+float y_samples [max_samples] = {0};
 float sum_x;
 float sum_y;
 float avg_yaw = 0;
@@ -108,56 +110,21 @@ void writeFloatLE(BluetoothSerial& bt, float v) {
 float update_average(float yaw){ //Give it a clamped yaw IN RADIANS
     unsigned long cur_sample_time = millis();
     if (cur_sample_time-prev_sample_time>sampling_period){
-        float old_yaw = yaw_samples[sample_idx%max_samples];
-        sum_x -= cos(old_yaw);
-        sum_y -= sin(old_yaw);
-
+        
 
         yaw_samples[sample_idx%max_samples] = yaw;
-        sum_x+=cos(yaw);
-        sum_y+=sin(yaw);
+        sum_x=0;
+        sum_y=0;
+        for (int i=0; i<max_samples; i++){
+            sum_x += cos(yaw_samples[i]);
+            sum_y += sin(yaw_samples[i]);
+        }
 
         avg_yaw = atan2(sum_y, sum_x);
         sample_idx++;
-        Serial.print("Sample index: ");
-        Serial.println(sample_idx);
-        Serial.print("avg_yaw: ");
-        Serial.println(avg_yaw);
-        Serial.print("SumX: ");
-        Serial.println(sum_x);
-        Serial.print("SumY: ");
-        Serial.println(sum_y);
     }
     return avg_yaw;
 }
-
-// =====================================================
-// Command Logic
-// =====================================================
-// void processManualCommand(char c) {
-//     c = tolower(c);
-//     if (c == 'c') {
-//         targetTurnOffsetDeg = 0.0f;
-//         currentTurnOffsetDeg = 0.0f;
-//         calibrateToCenter();
-//         motionEnabled = false;
-//         //Serial.println(">> Manual: CENTER & STOP");
-//     } else if (c == 'l') {
-//         targetTurnOffsetDeg = 15.0f;
-//         //Serial.println(">> Manual: TURN LEFT");
-//     } else if (c == 'r') {
-//         targetTurnOffsetDeg = -15.0f;
-//         //Serial.println(">> Manual: TURN RIGHT");
-//     } else if (c == 's') {
-//         targetTurnOffsetDeg = 0.0f;
-//         motionEnabled = true;
-//         //Serial.println(">> Manual: START MOTION");
-//     } else if (c == '+') {
-//         targetAmplitudeDeg = clampf(targetAmplitudeDeg + 5.0f, 0.0f, 60.0f);
-//     } else if (c == '-') {
-//         targetAmplitudeDeg = clampf(targetAmplitudeDeg - 5.0f, 0.0f, 60.0f);
-//     }
-// }
 
 void processManualCommand(char c, uint8_t packet[8]) {
     c = tolower(c);
@@ -299,18 +266,21 @@ void updateSensorsAndPosition() {
             float qk = sensorValue.un.gameRotationVector.k;
             // Yaw formula
             float yaw = atan2f(2.0f * (qi * qj + qk * qr), 1.0f - 2.0f * (qj * qj + qk * qk));
-            Serial.print("yaw in radian: ");
-            
             
             lastYawDeg = yaw * (180.0f / PI);
             if (!yawInitialized) { yaw0_deg = lastYawDeg; yawInitialized = true; }
-            update_average(yaw-yaw0_deg*(PI/180.0f));
-            Serial.println(yaw-yaw0_deg*(PI/180.0f));
+            
         }
     }
 
     if (!yawInitialized) return;
     theta_deg = wrapDeg(lastYawDeg - yaw0_deg);
+    update_average(theta_deg*(PI/180.0f));
+    // Serial.print("Average yaw: ");
+    // Serial.print(avg_yaw*(180.0f/PI));
+    // Serial.print(" Yaw: ");
+    // Serial.println(theta_deg);
+
     avg_yaw = avg_yaw* (180.0f / PI);
     float rad = theta_deg * (PI / 180.0f);
     xw_counts += cosf(rad) * (float)dx - sinf(rad) * (float)dy;
@@ -364,6 +334,7 @@ void setup() {
 }
 
 void loop() {
+    //unsigned long loop_start_time = millis();
     handleBluetoothRx();
     updateSensorsAndPosition();
 
@@ -445,4 +416,7 @@ void loop() {
         }
     }
     delay(20);
+    //unsigned long loop_end_time = millis();
+    // Serial.print("Loop time:");
+    // Serial.println(loop_end_time-loop_start_time);
 }
