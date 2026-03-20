@@ -200,6 +200,9 @@ class TelemetryUI:
             variable=self.control_mode_var, command=self._on_mode_change
         ).pack(side="left")
 
+        self.btn_stop = ttk.Button(mode_row, text="Stop (c)", command=self._send_stop)
+        self.btn_stop.pack(side="right")
+
         ttk.Separator(mode_frame).pack(fill="x", padx=10, pady=8)
 
         sub_row = ttk.Frame(mode_frame)
@@ -591,6 +594,10 @@ class TelemetryUI:
     def _amp_digit(self, d: int):
         self._set_amp_target(d * 5)
         self._send_cmd_char(str(d))  # '7' -> 70000000
+
+    def _send_stop(self):
+        self.manual_angle_var.set("C")
+        self._send_cmd_char('c')
 
     # ---------------- Key handling ----------------
     def on_key(self, event: tk.Event):
