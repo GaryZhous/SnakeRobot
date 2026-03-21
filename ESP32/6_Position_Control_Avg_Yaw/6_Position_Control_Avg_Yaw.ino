@@ -24,7 +24,7 @@
 static const int kNumServos = 8;
 static const int kServoPins[kNumServos] = {13, 12, 14, 27, 26, 25, 33, 32};
 static const float centimeters_per_count_y = 1.0f / 110.0f; // from 1/108
-static const float centimeters_per_count_x = 1.0f / 120.0f; // from 1/108
+static const float centimeters_per_count_x = 1.0f / 135.0f; // from 1/108
 
 // --- Control Modes & Gains ---
 enum ControlMode { MODE_M, MODE_P, MODE_D };
