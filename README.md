@@ -12,6 +12,7 @@ A snake robot built on the **ESP32** microcontroller. Eight servo motors create 
 - [Bluetooth Commands](#bluetooth-commands)
 - [Python GUI](#python-gui)
 - [Camera Web Server](#camera-web-server)
+- [3D Printing](#3d-printing)
 - [Project Structure](#project-structure)
 
 ---
@@ -49,7 +50,7 @@ The ESP32 reads heading from a **BNO08x IMU** and displacement from a **PMW3901 
 | 1 | BNO08x IMU (SPI) |
 | 1 | Bitcraze PMW3901 optical-flow sensor (SPI) |
 | 1 | 5 V regulated power supply (servos draw significant current) |
-| — | Jumper wires, chassis / 3-D printed links |
+| — | Jumper wires, chassis / 3-D printed links (see [3D Printing](#3d-printing)) |
 
 ### Wiring
 
@@ -175,12 +176,70 @@ The `CameraWebServer/` folder contains an **ESP32-CAM** sketch that streams live
 
 ---
 
+## 3D Printing
+
+The `CAD Files/` directory contains all STL meshes used to print the robot chassis, and the `3D Print Files/` directory contains pre-sliced Cura `.3mf` files ready to send directly to a printer.
+
+### CAD Files (STL)
+
+| File | Description |
+|------|-------------|
+| `Assembled.stl` | Full snake assembly reference |
+| `AssembledHead.stl` / `AssembledTail.stl` | Head and tail sub-assemblies |
+| `Head.stl` / `Tail.stl` | Individual head and tail prints |
+| `Connecting Piece.stl` | Body links that join servo segments |
+| `Motor Wrap.stl` | Servo motor sleeve / housing |
+| `MG996R SBORKA.stl` | MG996R servo bracket assembly |
+| `Clamp.stl` | Clamping ring for segment joints |
+| `ESPBracket.stl` | ESP32 board mounting bracket |
+| `ESP-WROOM32.stl` | ESP32 module reference model |
+| `IMU.stl` | BNO08x IMU mounting housing |
+| `Optical Flow Senssor.stl` | PMW3901 optical-flow sensor mount |
+| `Battery.stl` / `BatteryBracket.stl` / `BatteryHead.stl` / `Battery Compartment.stl` | Battery enclosure and mounting hardware |
+| `CamCaseTop.stl` / `CamCase Bottom.stl` | ESP32-CAM enclosure |
+| `CameraPlatform 2.stl` | Camera platform for top-down mounting |
+
+### 3D Print Files (pre-sliced)
+
+Ready-to-print Cura `.3mf` files for **PLA** at standard settings:
+
+| File | Contents |
+|------|----------|
+| `Rev3 Segment.gcode.3mf` | Snake body link segments |
+| `Rev3 Brackets PLA.gcode.3mf` | Servo mounting brackets |
+| `Rev3 Head PLA.gcode.3mf` | Head section |
+| `Rev3 Tail PLA.gcode.3mf` | Tail section |
+| `Rev3 BatteryBracket PLA.gcode.3mf` | Battery bracket |
+| `Rev3 CameraPlatform PLA.gcode.3mf` | Camera platform |
+| `Servo Base Plate (1).gcode.3mf` | Servo base plate |
+
+> **Tip:** Open `.3mf` files in [Ultimaker Cura](https://ultimaker.com/software/ultimaker-cura/) (or any slicer that supports `.3mf`) to preview or adjust print settings before slicing.
+
+---
+
 ## Project Structure
 
 ```
 SnakeRobot/
 ├── Arduino/
 │   └── Test_Code_250902/              # Early 2-servo Arduino prototype
+├── CAD Files/                         # STL meshes for all printed parts
+│   ├── Assembled.stl                  # Full snake assembly reference
+│   ├── Head.stl / Tail.stl
+│   ├── Connecting Piece.stl
+│   ├── Motor Wrap.stl
+│   ├── ESPBracket.stl
+│   ├── IMU.stl / Optical Flow Senssor.stl
+│   ├── Battery Compartment.stl / Battery.stl / ...
+│   └── CamCaseTop.stl / CamCase Bottom.stl / ...
+├── 3D Print Files/                    # Pre-sliced Cura .3mf files (PLA)
+│   ├── Rev3 Segment.gcode.3mf
+│   ├── Rev3 Brackets PLA.gcode.3mf
+│   ├── Rev3 Head PLA.gcode.3mf
+│   ├── Rev3 Tail PLA.gcode.3mf
+│   ├── Rev3 BatteryBracket PLA.gcode.3mf
+│   ├── Rev3 CameraPlatform PLA.gcode.3mf
+│   └── Servo Base Plate (1).gcode.3mf
 ├── CameraWebServer/                   # ESP32-CAM Wi-Fi video stream server
 │   ├── CameraWebServer.ino
 │   ├── board_config.h
