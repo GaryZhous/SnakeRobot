@@ -5,6 +5,7 @@ A snake robot built on the **ESP32** microcontroller. Eight servo motors create 
 ---
 
 ## Table of Contents
+- [Design Fair Poster](#design-fair-poster)
 - [Demo / Pinout](#demo--pinout)
 - [How It Works](#how-it-works)
 - [Hardware Setup](#hardware-setup)
@@ -14,6 +15,14 @@ A snake robot built on the **ESP32** microcontroller. Eight servo motors create 
 - [Camera Web Server](#camera-web-server)
 - [3D Printing](#3d-printing)
 - [Project Structure](#project-structure)
+
+---
+
+## Design Fair Poster
+
+📄 **[Team128_Design_Fair_Poster.pdf](Team128_Design_Fair_Poster.pdf)**
+
+The poster provides a high-level overview of the project — motivation, system architecture, hardware components, control strategy, and results — as presented at the design fair.
 
 ---
 
@@ -221,6 +230,7 @@ Ready-to-print Cura `.3mf` files for **PLA** at standard settings:
 
 ```
 SnakeRobot/
+├── Team128_Design_Fair_Poster.pdf         # Design fair poster
 ├── Arduino/
 │   └── Test_Code_250902/              # Early 2-servo Arduino prototype
 ├── CAD Files/                         # STL meshes for all printed parts
