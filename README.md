@@ -20,7 +20,7 @@ A snake robot built on the **ESP32** microcontroller. Eight servo motors create 
 
 ## Design Fair Poster
 
-![Design Fair](https://github.com/GaryZhous/SnakeRobot/blob/main/image.png)
+![Design Fair](https://github.com/GaryZhous/SnakeRobot/blob/main/design_fair_poster.png)
 
 The poster provides a high-level overview of the project — motivation, system architecture, hardware components, control strategy, and results — as presented at the design fair.
 
