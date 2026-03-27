@@ -7,7 +7,7 @@ import serial
 import tkinter as tk
 from tkinter import ttk, messagebox
 
-PORT = "COM4" 
+PORT = "COM4"       # Port number for your esp32
 BAUD = 115200       # SPP often ignores baud, but keep consistent
 READ_TIMEOUT = 0.2  # seconds
 
