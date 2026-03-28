@@ -22,7 +22,7 @@ A snake robot built on the **ESP32** microcontroller. Eight servo motors create 
 
 ![Design Fair](https://github.com/GaryZhous/SnakeRobot/blob/main/design_fair_poster.png)
 
-The poster provides a high-level overview of the project — motivation, system architecture, hardware components, control strategy, and results — as presented at the design fair on March 26, 2026.
+The poster provides a high-level overview of the project — motivation, system architecture, hardware components, control strategy, and results — as presented at the UofT Electrical and Computer Engineering Undergraduate Capstone Design Fair on March 26, 2026.
 
 ---
 
