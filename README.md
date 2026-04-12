@@ -2,6 +2,8 @@
 
 A snake robot built on the **ESP32** microcontroller. Eight servo motors create a sinusoidal traveling-wave gait, controlled via Bluetooth from a Python GUI that supports manual D-pad steering, autonomous direction tracking, and autonomous position control — with live telemetry (heading, X, Y) streamed back from an onboard IMU and optical-flow sensor.
 
+Demo Video - [Google Drive Link](https://drive.google.com/file/d/18MDr4CC4aUVm_WDjIK8m0Mhruf4S-zMb/view?usp=sharing)
+
 ---
 
 ## Table of Contents
